@@ -167,6 +167,45 @@ def test_relaxed_only_hits_are_downweighted():
     assert relaxed.score < primary.score
 
 
+def test_missing_subject_term_is_heavily_penalized():
+    """查询第一个词是主题词（片名），它缺失时必须重罚。"""
+    from pansearch.score import _relevance
+
+    subject = _make("1AAA", Status.ALIVE, title="沙丘 4K HDR 原盘")
+    qualifier_only = _make("1BBB", Status.ALIVE, title="黑夏 4K HDR 中文字幕")
+    assert _relevance(subject, "沙丘 4K HDR") == 1.0
+    assert _relevance(qualifier_only, "沙丘 4K HDR") <= 0.4
+
+
+def test_bonuses_cannot_overturn_missing_subject():
+    """回归：只命中"4K HDR"的结果曾靠百度优先+提取码+多源命中反超真正相关的「沙丘」。
+
+    这类结果（如「黑夏 4K HDR」「冬城猎凶 4K HDR」）实测占据过前排。
+    """
+    from pansearch.models import VerifyResult
+
+    # 真正相关：夸克、单源、无提取码
+    relevant = build_resources(
+        [hit("https://pan.quark.cn/s/aaaaaaaaaaaa", title="沙丘2 4K HDR 杜比视界")]
+    )[0]
+    relevant.verify = VerifyResult(status=Status.ALIVE)
+
+    # 不相关但"条件很好"：百度 + 有提取码 + 三个 TG 频道都命中
+    irrelevant = build_resources(
+        [
+            hit("https://pan.baidu.com/s/1BBB?pwd=1111", pwd="1111", title="黑夏 4K HDR 中文字幕", kind="tg"),
+            hit("https://pan.baidu.com/s/1BBB?pwd=1111", pwd="1111", title="黑夏 4K HDR 中文字幕", kind="tg"),
+            hit("https://pan.baidu.com/s/1BBB?pwd=1111", pwd="1111", title="黑夏 4K HDR 中文字幕", kind="tg"),
+        ]
+    )[0]
+    irrelevant.verify = VerifyResult(status=Status.ALIVE, pwd_verified=True)
+
+    scored = sort_resources(score_all([irrelevant, relevant], "沙丘 4K HDR"))
+    assert scored[0] is relevant, (
+        f"主题词缺失的结果不该排第一（relevant={relevant.score}, irrelevant={irrelevant.score}）"
+    )
+
+
 def test_resource_merging_prefers_primary_hit():
     resources = build_resources(
         [

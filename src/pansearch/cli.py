@@ -153,6 +153,7 @@ def search(
     limit: int = typer.Option(30, "--limit", "-n", help="最多显示多少条"),
     show_all: bool = typer.Option(False, "--all", "-a", help="包含已失效的结果"),
     strict: bool = typer.Option(False, "--strict", help="严格模式：连码错的、无法验活的也一并剔除"),
+    relax: bool = typer.Option(True, "--relax/--no-relax", help="多词查询时自动补搜主词（默认开，大幅提升召回）"),
     no_verify: bool = typer.Option(False, "--no-verify", help="跳过有效性校验（快很多，但不知道链接死活）"),
     show_origins: bool = typer.Option(False, "--origins", help="额外打印来源页面"),
     json_out: Optional[Path] = typer.Option(None, "--json", help="结果导出为 JSON"),
@@ -171,6 +172,7 @@ def search(
                 do_verify=not no_verify,
                 alive_only=not show_all,
                 strict=strict,
+                relax=relax,
                 limit=None,
             )
         )
@@ -287,6 +289,75 @@ def stats() -> None:
             table.add_row(kw, str(cnt))
         console.print(table)
     cache.close()
+
+
+index_app = typer.Typer(help="Telegram 频道索引：越挖越全，之后检索毫秒级")
+app.add_typer(index_app, name="index")
+
+
+@index_app.command("crawl")
+def index_crawl(
+    pages: int = typer.Option(1, "--pages", "-p", help="每个频道抓多少页（每页约 20 条）"),
+    deepen: bool = typer.Option(False, "--deepen", help="从上次挖到的位置继续向历史深挖"),
+    concurrency: int = typer.Option(12, "--concurrency", "-c", help="并发抓取数"),
+) -> None:
+    """抓取 TG 频道消息进本地索引。"""
+    from .adapters.telegram import ensure_index
+    from .tgindex import load_channels
+
+    channels = load_channels()
+    if not channels:
+        console.print("[red]config/tg_channels.txt 为空[/red]")
+        raise typer.Exit(1)
+
+    mode = "向历史深挖" if deepen else "抓取最新"
+    console.print(f"[cyan]{mode}：{len(channels)} 个频道 × {pages} 页…[/cyan]")
+    with console.status("[cyan]抓取中…[/cyan]"):
+        stats = asyncio.run(ensure_index(pages=pages, deepen=deepen, concurrency=concurrency))
+
+    if "error" in stats:
+        console.print(f"[red]{stats['error']}[/red]")
+        raise typer.Exit(1)
+    console.print(
+        f"[green]完成[/green]：频道 {stats['channels']} 个 ｜ 页面 {stats['pages']} ｜ "
+        f"消息 {stats['messages']} 条 ｜ 新增 {stats['new']} 条 ｜ 失败 {stats['errors']} 个"
+    )
+
+
+@index_app.command("stats")
+def index_stats() -> None:
+    """查看 TG 索引覆盖情况。"""
+    from .tgindex import TgIndex, load_channels
+
+    index = TgIndex()
+    try:
+        info = index.stats()
+        rows = index.channel_rows()
+    finally:
+        index.close()
+
+    total_channels = len(load_channels())
+    console.print(
+        Panel(
+            f"已索引消息 [bold]{info['messages']}[/bold] 条"
+            f"（其中 [bold]{info['messages_with_links']}[/bold] 条含网盘链接）\n"
+            f"有数据的频道 [bold]{info['channels_indexed']}[/bold] / {total_channels}\n"
+            f"数据库：{info['db']}",
+            title="TG 索引",
+            border_style="cyan",
+        )
+    )
+    if rows:
+        table = Table(box=box.SIMPLE, header_style="bold cyan")
+        table.add_column("频道")
+        table.add_column("消息数", justify="right")
+        table.add_column("最新 ID", justify="right")
+        table.add_column("最旧 ID", justify="right")
+        table.add_column("状态")
+        for channel, count, newest, oldest, status in rows[:25]:
+            table.add_row(channel, str(count), str(newest or "-"), str(oldest or "-"),
+                          str(status or "-"))
+        console.print(table)
 
 
 @app.command()

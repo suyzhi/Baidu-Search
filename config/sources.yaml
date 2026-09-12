@@ -18,15 +18,30 @@ sources:
   pansou:
     enabled: true
     kind: pansou
-    # 公共实例（M1 先用它；M4 自建后改成本地地址，如 http://127.0.0.1:8888）
+    # 公共实例（M4 自建后改成本地地址，如 http://127.0.0.1:8888）
     instances:
       - https://so.252035.xyz
-    # 实测公共实例会偶发 400 / timeout，故多实例 + 重试
+    # 实测公共实例会偶发 400 / timeout / 429，故多实例 + 重试 + 短超时快速失败
     weight: 1.0
-    timeout: 30
-    retries: 2
+    timeout: 15
+    deadline: 25          # 插件覆盖是 TG 没有的，给它足够时间
+    retries: 1
     concurrency: 2
     rate_limit_qps: 1.5
+
+  # ---- C 环：Telegram 频道（本地索引直连）----
+  # 全网网盘链接的主要产地。直连 t.me，不经第三方，可并行上百频道 + 向历史翻页。
+  # 首次搜索若索引为空会自动抓一轮；之后用 pansearch index crawl 持续加深。
+  telegram:
+    enabled: true
+    kind: tg
+    weight: 0.9
+    auto_index: true          # 索引为空时自动抓最新一页
+    max_hits: 400             # 每次检索最多取多少条消息
+    crawl_concurrency: 12
+    timeout: 20
+    channels_file: null       # 默认 config/tg_channels.txt
+    index_path: null          # 默认 .cache/tg_index.sqlite3
 
   # ---- B 环：搜索引擎定向检索（捞聚合站搜不到的"野链接"）----
   # 两阶段：先搜到"资源讨论页"，再抓这些页面抽网盘链接。
@@ -37,19 +52,19 @@ sources:
     kind: websearch
     weight: 0.6
     timeout: 25
-    concurrency: 2
-    rate_limit_qps: 0.4         # brave 429 敏感，间隔给足
-    fetch_result_pages: true    # 阶段 2：抓内容页（大幅提升召回）
-    max_pages: 6
-    page_timeout: 12
-    page_concurrency: 4
+    deadline: 12          # 实测产出很低（每次 3~6 条），不值得拖慢整体
+    concurrency: 3
+    rate_limit_qps: 1.5         # 实测 0.4 太保守：6 个请求光限速就要 15s
+    fetch_result_pages: true    # 阶段 2：抓内容页（召回主力，比阶段 1 值钱）
+    max_pages: 20
+    page_timeout: 10
+    page_concurrency: 8
     engines:
       brave: "https://search.brave.com/search?q={q}"
       so: "https://www.so.com/s?q={q}"
     templates:
       - 'site:pan.baidu.com/s {kw}'
       - '"{kw}" 百度网盘 提取码'
-      - '"{kw}" 百度网盘 下载 提取码'
 
   bilibili:
     enabled: false
@@ -62,17 +77,21 @@ sources:
 
 verify:
   enabled: true
-  concurrency: 12         # 跨网盘并发；每个网盘另有自己的限速
-  rate_limit_qps: 4.0     # 百度专用（对 pan.baidu.com 温柔一点）
+  concurrency: 16         # 跨网盘并发；每个网盘另有自己的限速
+  rate_limit_qps: 5.0     # 百度专用（对 pan.baidu.com 温柔一点）
   cache_ttl_hours: 6
-  timeout: 20
-  retries: 2
+  timeout: 15
+  retries: 1
+  # 验活预算：结果很多时只验活**最相关**的前 N 条（先按相关性排序再验活）。
+  # 700+ 条全量验活要 1~2 分钟，而用户通常只看前几十条；超出的标记为"未校验"。
+  # 设为 0 表示不限制（全量验活）。
+  budget: 300
   # 各网盘验活的独立限速（覆盖 config/pan_errno.yaml 里的 qps）
   services:
-    quark:  {qps: 6.0}
-    aliyun: {qps: 6.0}
-    "115":  {qps: 4.0}
-    tianyi: {qps: 4.0}
+    quark:  {qps: 10.0}
+    aliyun: {qps: 10.0}
+    "115":  {qps: 6.0}
+    tianyi: {qps: 6.0}
 
 scoring:
   kind_weight:
@@ -90,7 +109,12 @@ scoring:
     unknown: 0.3
     dead: 0.02
     not_found: 0.0
-  multi_source_bonus: 0.25   # 多源命中加成：每多一个来源相对提升 25%（封顶 +50%）
+  multi_source_bonus: 0.12   # 多源命中加成：每多一个来源相对提升 12%（封顶 +35%）
   freshness_halflife_days: 730
-  pan_priority_bonus: 0.3    # 百度优先：相对提升 30%（乘法因子，不做排序层级）
+  pan_priority_bonus: 0.25   # 百度优先：相对提升 25%（乘法因子，不做排序层级）
   relaxed_penalty: 0.5       # 只被"放宽查询"命中的结果降权为 50%
+  relevance_power: 2.0       # 相关性幂次闸门：把"主题词命中/缺失"的差距拉大，防止被加成翻盘
+
+# 抓取阶段的整体截止时间（秒）：超过就跳过还没返回的数据源。
+# 实测 TG 本地索引 0.0s / PanSou 8~15s / Brave 15~22s —— 不等最慢的那个。
+fetch_deadline: 15

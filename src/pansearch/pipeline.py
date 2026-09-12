@@ -10,10 +10,11 @@ import httpx
 
 from .adapters import REGISTRY
 from .adapters import pansou as _pansou  # noqa: F401  触发注册
+from .adapters import telegram as _telegram  # noqa: F401  触发注册
 from .adapters import websearch as _websearch  # noqa: F401  触发注册
-from .config import sources_config
+from .config import sources_config, verify_cfg
 from .dedupe import build_resources
-from .models import PanType, RawHit, Resource
+from .models import PanType, RawHit, Resource, Status, VerifyResult
 from .score import score_all, sort_resources
 from .verifiers import VerifierPool, prune
 
@@ -22,10 +23,6 @@ UA = (
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
-# 原始命中少于此值时，自动用"放宽查询"补一次召回。
-# 实测多词查询（如「沙丘 4K HDR」）在聚合引擎只有个位数~几十条，
-# 而主词（「沙丘」）有 180+ 条，所以阈值给宽一点。
-RELAX_THRESHOLD = 60
 _TERM_SPLIT = re.compile(r"[\s,，、/|·]+")
 
 
@@ -53,6 +50,7 @@ class SearchOutcome:
     dedup_count: int = 0
     pruned: int = 0
     strict: bool = False
+    verify_budget_skipped: int = 0
     used_sources: list[str] = field(default_factory=list)
     queries_used: list[str] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)
@@ -79,17 +77,33 @@ def build_adapters(names: list[str] | None = None):
 
 
 async def _fetch_hits(
-    adapters, client: httpx.AsyncClient, query: str
+    adapters, client: httpx.AsyncClient, query: str, *, deadline: float | None = None
 ) -> tuple[list[RawHit], dict[str, str]]:
-    """并发打所有数据源，单源失败隔离。"""
-    results = await asyncio.gather(
-        *(a.search(query, client) for a in adapters), return_exceptions=True
-    )
+    """并发打所有数据源，**每个源有自己的截止时间**，超时就跳过。
+
+    实测各源耗时差异极大（TG 本地索引 0.0s / PanSou 8~25s / Brave 15~22s）。
+    一刀切的截止时间会误伤：定 15s 时 PanSou 常被砍掉，而定 30s 又要为低产出的
+    Brave 白等。所以按各源自己的 `deadline` 配置（缺省用全局 fetch_deadline）。
+    """
+    default = float(deadline or sources_config().get("fetch_deadline") or 15.0)
+
+    async def one(adapter) -> list[RawHit]:
+        limit = float(adapter.cfg.get("deadline") or default)
+        try:
+            return await asyncio.wait_for(adapter.search(query, client), timeout=limit)
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"超时（>{limit:.0f}s），已跳过") from None
+
+    results = await asyncio.gather(*(one(a) for a in adapters), return_exceptions=True)
+
     hits: list[RawHit] = []
     errors: dict[str, str] = {}
     for adapter, result in zip(adapters, results):
         if isinstance(result, BaseException):
-            errors[adapter.name] = f"{type(result).__name__}: {result}"
+            errors[adapter.name] = (
+                str(result) if isinstance(result, RuntimeError)
+                else f"{type(result).__name__}: {result}"
+            )
         else:
             hits.extend(result)
     return hits, errors
@@ -104,6 +118,7 @@ async def search(
     alive_only: bool = False,
     strict: bool = False,
     relax: bool = True,
+    verify_budget: int | None = None,
     limit: int | None = None,
 ) -> SearchOutcome:
     kw = kw.strip()
@@ -122,22 +137,27 @@ async def search(
         http2=True,
         headers={"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"},
     ) as client:
-        hits, errors = await _fetch_hits(adapters, client, kw)
-        outcome.errors.update(errors)
+        # 主查询与"放宽查询"并行发出：省掉一轮串行等待
+        queries = [kw] + (relaxed_queries(kw) if relax else [])
+        batches = await asyncio.gather(
+            *(_fetch_hits(adapters, client, q) for q in queries),
+            return_exceptions=True,
+        )
 
-        # 多词查询召回塌陷时，用放宽查询补召回（补搜结果会被降权，不会淹没主结果）
-        if relax and len(hits) < RELAX_THRESHOLD:
-            for alt in relaxed_queries(kw):
-                more, alt_errors = await _fetch_hits(adapters, client, alt)
-                for name, err in alt_errors.items():
-                    outcome.errors.setdefault(name, err)
-                if more:
-                    for hit in more:
-                        hit.relaxed = True
-                    hits.extend(more)
-                    outcome.queries_used.append(alt)
-                if len(hits) >= RELAX_THRESHOLD * 4:
-                    break
+        hits: list[RawHit] = []
+        for query, batch in zip(queries, batches):
+            if isinstance(batch, BaseException):
+                outcome.errors.setdefault("_", f"{type(batch).__name__}: {batch}")
+                continue
+            got, errs = batch
+            for name, err in errs.items():
+                outcome.errors.setdefault(name, err)
+            if query != kw:
+                for hit in got:
+                    hit.relaxed = True
+                if got:
+                    outcome.queries_used.append(query)
+            hits.extend(got)
 
         outcome.raw_hits = len(hits)
 
@@ -149,9 +169,28 @@ async def search(
             resources = [r for r in resources if r.pan_type in allowed]
 
         if do_verify and resources:
+            # ---- 验活预算：先按相关性排序，只验活最相关的前 N 条 ----
+            # 大结果集（700+）全量验活要 1~2 分钟，而用户只看前几十条。
+            budget = verify_budget if verify_budget is not None else verify_cfg().get("budget", 300)
+            budget = int(budget or 0)
+            if budget > 0 and len(resources) > budget:
+                score_all(resources, kw)
+                resources.sort(key=lambda r: -r.score)
+                head, tail = resources[:budget], resources[budget:]
+                outcome.verify_budget_skipped = len(tail)
+                for res in tail:
+                    res.verify = VerifyResult(
+                        status=Status.UNCHECKED,
+                        note=f"超出验活预算（仅验活最相关的前 {budget} 条）",
+                    )
+                resources = head
+            else:
+                tail = []
+
             async with VerifierPool() as pool:
                 await pool.verify_all(resources)
                 outcome.verify_stats = dict(pool.stats)
+            resources = resources + tail
 
     score_all(resources, kw)
     resources = sort_resources(resources)

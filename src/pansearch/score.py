@@ -13,33 +13,38 @@ _TERM_SPLIT = re.compile(r"[\s,，、/|·]+")
 
 
 def _relevance(res: Resource, kw: str) -> float:
-    """多词查询按「命中词数比例」打分。
+    """多词查询按「命中词数比例」打分，并**特殊对待第一个词**。
 
-    中文没有分词，所以对 "沙丘 4K HDR" 这种查询要拆成词分别匹配，
-    否则标题「沙丘：预言 (2024) 4K DV＆HDR」会被判成不相关（旧实现的 bug）。
+    中文没有分词，所以 "沙丘 4K HDR" 要拆成词分别匹配。
+    但光看命中比例不够：实测「黑夏 4K HDR」「冬城猎凶 4K HDR」这类只命中
+    "4K/HDR" 的结果，靠百度优先+提取码+多源命中的连乘能反超真正相关的
+    「沙丘 4K HDR」。所以查询的第一个词（通常是片名/主题词）缺失必须重罚。
     """
     k = kw.lower().strip()
     if not k:
         return 1.0
     title = (res.title or "").lower()
     if not title:
-        return 0.4
+        return 0.3
 
     terms = [t for t in _TERM_SPLIT.split(k) if t]
     if not terms:
         return 1.0
 
     matched = sum(1 for t in terms if t in title)
+    subject_present = terms[0] in title
+
     if matched == len(terms):
         return 1.0 if title.startswith(terms[0]) else 0.95
-    if matched == 0:
-        # 整串（去掉分隔符）的每个字都出现时的近似命中
-        compact = "".join(terms)
-        if len(compact) > 1 and all(ch in title for ch in compact):
-            return 0.45
+
+    if not subject_present:
+        # 主题词都没出现 -> 上限压到 0.4，保证任何加成组合都翻不了身
+        return (round(0.15 + 0.25 * (matched / len(terms)), 4) if matched else 0.1)
+
+    if matched == 0:  # 不会走到（subject_present 蕴含 matched>=1），保底
         return 0.2
-    # 部分命中要**明显**低于全命中，否则网盘优先加分会把不相关结果顶上去
-    return round(0.2 + 0.5 * (matched / len(terms)), 4)
+    # 主题词在，但缺少限定词（4K/HDR 等）
+    return round(0.45 + 0.55 * (matched / len(terms)), 4)
 
 
 def _kind_weight(res: Resource, cfg: dict) -> float:
@@ -68,19 +73,24 @@ def _freshness(res: Resource, cfg: dict) -> float:
 def score_resource(res: Resource, kw: str, cfg: dict | None = None) -> float:
     """打分：全部加成都是**乘法因子**，最后再乘状态权重。
 
-    加法是有害的：如果百度优先(+0.3)和提取码(+0.1)是加数，一条相关性只有 0.53
-    的不相关百度结果会拿到 0.83 分，反而压过相关性 1.0 的夸克结果（0.8 分）。
-    改成乘法后，相关性差距不会被固定加分抹平。
-    状态权重同样必须最后相乘，否则失效链接仍会拿到高分。
+    两个反直觉的坑（都是被真实结果逼出来的）：
+
+    1. 加法是有害的：百度优先、提取码、多源命中如果是加数，一条相关性只有 0.53
+       的不相关结果能拿到 0.83 分，压过相关性 1.0 的相关结果（0.8 分）。
+    2. 光靠因子相乘还不够：百度(×1.25) × 提取码(×1.1) × 多源命中(×1.35) = ×1.86，
+       仍能翻过"主题词命中/缺失"之间约 3 倍的相关性差距。所以相关性再加一个幂次
+       闸门（默认平方），把差距拉到 ~9 倍，任何加成组合都翻不过来。
+    3. 状态权重必须最后相乘，否则失效链接仍会拿到高分。
     """
     cfg = cfg or scoring_cfg()
 
-    score = _relevance(res, kw) * _kind_weight(res, cfg) * _freshness(res, cfg)
+    relevance = _relevance(res, kw) ** float(cfg.get("relevance_power") or 1.0)
+    score = relevance * _kind_weight(res, cfg) * _freshness(res, cfg)
 
-    # 多源命中加成（相对提升，封顶 50%）
+    # 多源命中加成（相对提升，封顶 35%）
     bonus = float(cfg.get("multi_source_bonus") or 0.0)
     if res.hit_count > 1:
-        score *= 1.0 + min(0.5, (res.hit_count - 1) * bonus)
+        score *= 1.0 + min(0.35, (res.hit_count - 1) * bonus)
 
     # 百度优先
     if res.pan_type is PanType.BAIDU:

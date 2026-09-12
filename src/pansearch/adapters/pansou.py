@@ -34,6 +34,7 @@ class PansouAdapter(Adapter):
 
     async def _query(self, client: httpx.AsyncClient, url: str, kw: str) -> dict | None:
         retries = int(self.cfg.get("retries") or 2)
+        timeout = float(self.cfg.get("timeout") or 15)
         last_err: str | None = None
         for attempt in range(retries + 1):
             try:
@@ -41,6 +42,7 @@ class PansouAdapter(Adapter):
                     f"{url}/api/search",
                     params={"kw": kw},
                     headers={"Accept": "application/json", "Referer": url + "/"},
+                    timeout=timeout,
                 )
             except httpx.HTTPError as exc:
                 last_err = str(exc)
