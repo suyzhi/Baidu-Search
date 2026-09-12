@@ -320,12 +320,19 @@ async def probe_domain(
     patterns: tuple[str, ...] = SEARCH_PATTERNS,
     min_hits: int = 3,
     min_gain: int = 3,
+    budget: float = 75.0,
 ) -> ProbeResult:
     """探测一个域名的可用搜索 URL 模板。
 
     判据是**对照法**：真词的结果条目要明显多于无意义串，也要明显多于首页
     —— 只看"页面里有没有关键词"会误判（很多站不回显关键词）。
+
+    `budget` 是这个域名的墙钟预算（秒）。25 个模板 × 3 个探测词 × 2 次请求
+    最多 150 次请求；碰上"首页能通、但每个搜索页都慢慢超时"的站，
+    没有上限就会一个域名卡好几分钟。超预算就带着已有结果返回。
     """
+    import time
+    started = time.monotonic()
     base = domain if domain.startswith("http") else f"https://{domain}"
     base = base.rstrip("/")
     host = base.split("//", 1)[-1]
@@ -346,7 +353,11 @@ async def probe_domain(
     best_yield = 0
     noise = _garbage()
     for tpl in patterns:
+        if time.monotonic() - started > budget:
+            break                      # 超墙钟预算就收手，别为一个域名卡几分钟
         for term in probe_terms:
+            if time.monotonic() - started > budget:
+                break
             real_url = base + tpl.format(q=urllib.parse.quote(term))
             noise_url = base + tpl.format(q=noise)
             try:

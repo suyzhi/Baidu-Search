@@ -494,6 +494,68 @@ def sites_route(
         console.print(f"  {entry.name:<18} [{','.join(entry.verticals) or '-'}] {entry.search}")
 
 
+@sites_app.command("coverage")
+def sites_coverage() -> None:
+    """看各垂直领域的覆盖情况：资源站 + TG 频道。"""
+    import re as _re
+
+    from .routing import VERTICAL_KEYWORDS
+    from .sitecatalog import load_catalog
+    from .tgindex import TgIndex, load_channels
+
+    catalog = load_catalog()
+    sites_by_v: dict[str, int] = {}
+    for entry in catalog:
+        for v in entry.verticals or ["general"]:
+            sites_by_v[v] = sites_by_v.get(v, 0) + 1
+
+    # tg_channels.txt 里采收的频道按 "# 垂直领域: xxx（N 个）" 分组标注
+    from .tgindex import DEFAULT_CHANNELS_FILE
+
+    tagged: dict[str, int] = {}
+    current: str | None = None
+    tag_re = _re.compile(r"^#\s*垂直领域:\s*([a-z-]+)")
+    try:
+        lines = DEFAULT_CHANNELS_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        text = line.strip()
+        m = tag_re.match(text)
+        if m:
+            current = m.group(1)
+            tagged.setdefault(current, 0)
+            continue
+        if text and not text.startswith("#") and current:
+            tagged[current] = tagged.get(current, 0) + 1
+
+    index = TgIndex()
+    try:
+        total_msgs = index.stats()["messages"]
+    finally:
+        index.close()
+
+    table = Table(box=box.SIMPLE, header_style="bold cyan")
+    table.add_column("垂直领域")
+    table.add_column("资源站", justify="right")
+    table.add_column("TG 频道", justify="right")
+    table.add_column("状态")
+    for v in list(VERTICAL_KEYWORDS) + ["general"]:
+        n_sites = sites_by_v.get(v, 0)
+        n_ch = tagged.get(v, 0)
+        ok = n_sites or n_ch
+        table.add_row(
+            v, str(n_sites) if n_sites else "-", str(n_ch) if n_ch else "-",
+            "[green]✓[/green]" if n_sites and n_ch else ("[yellow]偏薄[/yellow]" if ok else "[red]缺[/red]"),
+        )
+    console.print(table)
+    console.print(
+        f"[dim]资源站目录 {len(catalog)} 个 ｜ TG 频道 {len(load_channels())} 个 ｜ "
+        f"索引 {total_msgs} 条消息[/dim]"
+    )
+    console.print("[dim]注：TG 频道只有采收来的那部分带垂直标注，其余按影视/通用计。[/dim]")
+
+
 @app.command()
 def web(
     host: str = typer.Option("127.0.0.1", help="监听地址"),
