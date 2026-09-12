@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from .extract import excerpt
 from .models import PanType
 from .pipeline import search as run_search
 
@@ -74,6 +75,7 @@ async def api_search(
             "results": [
                 {
                     "title": res.title,
+                    "display_title": excerpt(res.title, kw, 110),
                     "pan_type": res.pan_type.value,
                     "pan_label": res.pan_type.label,
                     "url": res.open_url(),

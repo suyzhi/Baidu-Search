@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pansearch.extract import extract_from_text, html_to_text, page_title
+from pansearch.extract import excerpt, extract_from_text, html_to_text, page_title
 
 
 def _hits(text: str):
@@ -82,3 +82,48 @@ def test_html_to_text_and_title():
     assert page_title(html) == "三体 资源帖"
     hits = extract_from_text(html_to_text(html), source="s", kind="t")
     assert len(hits) == 1
+
+
+# ---------------------------------------------------------------- 展示用片段
+LONG = (
+    "🗄 Re：从零开始的异世界生活 第四季(2026） 1080p CR S04E01 - E16 内封简繁 Hiv "
+    "描述：本剧改编自长月达平创作的同名轻小说 链接：https://pan.quark.cn/s/xxx "
+    "另外本频道也收录 沙丘 2部 4K HDR 中字外挂字幕"
+)
+
+
+def test_excerpt_centers_on_subject_term():
+    """回归：标题取消息前 300 字时，匹配词可能在后段，看起来像不相关。
+
+    实测「沙丘 2」排第一的标题显示成「Re：从零开始的异世界生活…」。
+    """
+    out = excerpt(LONG, "沙丘 2", 80)
+    assert "沙丘 2部" in out
+    assert out.startswith("…"), "片段来自中段时应标出省略"
+
+
+def test_excerpt_prefers_subject_over_earlier_weak_term():
+    """回归：不能取"最早出现"的词 —— 「沙丘 2」的 "2" 会在 "2026" 里先命中。"""
+    out = excerpt(LONG, "沙丘 2", 80)
+    assert "Re：从零开始" not in out, "不该被 2026 里的 2 拉回开头"
+
+
+def test_excerpt_uses_earliest_term_when_subject_absent():
+    out = excerpt(LONG, "1080p 不存在", 80)
+    assert "1080p" in out
+
+
+def test_excerpt_falls_back_to_head_when_no_term_matches():
+    out = excerpt(LONG, "完全不相关", 40)
+    assert out.startswith("🗄 Re")
+    assert out.endswith("…")
+
+
+def test_excerpt_short_text_untouched():
+    assert excerpt("沙丘 2部 4K", "沙丘", 80) == "沙丘 2部 4K"
+
+
+def test_excerpt_handles_empty_inputs():
+    assert excerpt(None, "沙丘") == ""
+    assert excerpt("", "沙丘") == ""
+    assert excerpt("x", None) == "x"

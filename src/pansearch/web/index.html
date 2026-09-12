@@ -251,7 +251,7 @@ function render(data, secs){
 
     const origin = (r.origins || [])[0];
     return '<div class="card' + (r.alive ? '' : ' dead') + '">' +
-      '<div class="card-top"><div class="title">' + (esc(r.title) || '<span style="color:var(--dim)">（无标题）</span>') + '</div></div>' +
+      '<div class="card-top"><div class="title">' + (esc(r.display_title || r.title) || '<span style="color:var(--dim)">（无标题）</span>') + '</div></div>' +
       '<div class="badges">' + badges.join('') + '</div>' +
       '<div class="linkrow">' +
         '<a class="link" href="' + esc(r.url) + '" target="_blank" rel="noopener">' + esc(r.url) + '</a>' +

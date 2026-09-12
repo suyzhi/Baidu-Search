@@ -125,6 +125,30 @@ def test_multiterm_query_ranks_full_match_first():
     assert _relevance(_make("1AAA", Status.ALIVE, title="沙丘 4K HDR 原盘"), "沙丘 4K HDR") == 1.0
 
 
+def test_digit_term_must_be_adjacent_to_subject():
+    """回归：「沙丘 2」里的 "2" 会在 "2026"/"1080p" 里到处命中，
+    让「奥古利亚沙丘」「沙丘鹤」和真正的「沙丘2部合集」全都算全词命中。"""
+    from pansearch.score import _relevance
+
+    real = _make("1AAA", Status.ALIVE, title="名称：沙丘2部合集 (2024) 4K 科幻剧情")
+    real_spaced = _make("1AAB", Status.ALIVE, title="沙丘 2 部合集 4K")
+    place = _make("1BBB", Status.ALIVE, title="奥古利亚沙丘深处的巨塔 (2026) 1080p")
+    bird = _make("1CCC", Status.ALIVE, title="沙丘鹤的迁徙 (2026) 1080p 纪录片")
+
+    kw = "沙丘 2"
+    assert _relevance(real, kw) == 0.95
+    assert _relevance(real_spaced, kw) >= 0.9
+    assert _relevance(place, kw) < _relevance(real, kw)
+    assert _relevance(bird, kw) < _relevance(real, kw)
+
+
+def test_digit_term_alone_is_still_matched():
+    """只有数字词时按普通子串处理，不要把它彻底忽略。"""
+    from pansearch.score import _relevance
+
+    assert _relevance(_make("1AAA", Status.ALIVE, title="沙丘 2 部合集"), "2") == 0.95
+
+
 def test_sort_puts_verified_above_unverified():
     """勾了"剔除失效"后，已验证可用的链接必须浮到未验活的上面。"""
     from pansearch.models import VerifyResult

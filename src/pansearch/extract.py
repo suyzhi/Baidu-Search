@@ -19,6 +19,42 @@ from .normalize import (
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"[ \t\u00a0]+")
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+_TERM_SPLIT = re.compile(r"[\s,，、/|·]+")
+
+
+def excerpt(text: str | None, keyword: str | None, width: int = 90) -> str:
+    """截取**包含关键词的那一段**，而不是永远取开头。
+
+    Telegram 一条消息常常列了好几个资源，标题又取的是消息前若干字，
+    于是搜索结果看起来像是不相关（实测「沙丘 2」排第一的标题显示成
+    「Re：从零开始的异世界生活…」，而匹配词其实在消息后段）。
+    这里围绕第一个命中词取片段，让人一眼看出"为什么这条相关"。
+    """
+    if not text:
+        return ""
+    flat = " ".join(str(text).split())
+    if len(flat) <= width:
+        return flat
+
+    terms = [t for t in _TERM_SPLIT.split(keyword or "") if t]
+    # 按查询顺序找：第一个词是主题词，优先用它定位。
+    # 不能取"最早出现"的那个词 —— 「沙丘 2」的 "2" 会在 "2026" 里就命中，
+    # 结果又把片段拉回开头，等于没修。
+    pos = -1
+    for term in terms:
+        found = flat.lower().find(term.lower())
+        if found >= 0:
+            pos = found
+            break
+
+    if pos < 0:
+        return flat[:width] + "…"
+
+    half = width // 2
+    start = max(0, pos - half)
+    end = min(len(flat), start + width)
+    start = max(0, end - width)
+    return ("…" if start > 0 else "") + flat[start:end] + ("…" if end < len(flat) else "")
 
 
 def html_to_text(raw: str) -> str:

@@ -12,13 +12,32 @@ from .models import PanType, Resource, Status
 _TERM_SPLIT = re.compile(r"[\s,，、/|·]+")
 
 
+def _matched_terms(title: str, terms: list[str]) -> int:
+    """统计标题命中了几个查询词。
+
+    数字词要**紧贴前一个词**才算命中（"沙丘2" / "沙丘 2"）。
+    否则「沙丘 2」里的 "2" 会在 "2026"、"1080p" 里到处命中，
+    让「奥古利亚沙丘」「沙丘荒原」「沙丘鹤」和真正的「沙丘2部合集」
+    全都算"全词命中" —— 实测这些不相关结果就是这样挤进前排的。
+    """
+    matched = 0
+    for i, term in enumerate(terms):
+        if term.isdigit() and i > 0:
+            prev = terms[i - 1]
+            if f"{prev}{term}" in title or f"{prev} {term}" in title:
+                matched += 1
+        elif term in title:
+            matched += 1
+    return matched
+
+
 def _relevance(res: Resource, kw: str) -> float:
     """多词查询按「命中词数比例」打分，并**特殊对待第一个词**。
 
     中文没有分词，所以 "沙丘 4K HDR" 要拆成词分别匹配。
-    但光看命中比例不够：实测「黑夏 4K HDR」「冬城猎凶 4K HDR」这类只命中
-    "4K/HDR" 的结果，靠百度优先+提取码+多源命中的连乘能反超真正相关的
-    「沙丘 4K HDR」。所以查询的第一个词（通常是片名/主题词）缺失必须重罚。
+    但光看命中比例不够：「黑夏 4K HDR」这类只命中限定词的结果，
+    靠百度优先 + 提取码 + 多源命中的连乘能反超真正相关的结果，
+    所以查询的第一个词（通常是片名/主题词）缺失必须重罚。
     """
     k = kw.lower().strip()
     if not k:
@@ -31,7 +50,7 @@ def _relevance(res: Resource, kw: str) -> float:
     if not terms:
         return 1.0
 
-    matched = sum(1 for t in terms if t in title)
+    matched = _matched_terms(title, terms)
     subject_present = terms[0] in title
 
     if matched == len(terms):
@@ -43,7 +62,7 @@ def _relevance(res: Resource, kw: str) -> float:
 
     if matched == 0:  # 不会走到（subject_present 蕴含 matched>=1），保底
         return 0.2
-    # 主题词在，但缺少限定词（4K/HDR 等）
+    # 主题词在，但缺少限定词（4K/HDR/续集编号等）
     return round(0.45 + 0.55 * (matched / len(terms)), 4)
 
 

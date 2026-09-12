@@ -15,6 +15,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import __version__
+from .extract import excerpt
 from .models import PanType, Resource, Status
 from .pipeline import search as run_search
 from .store import VerifyCache
@@ -85,7 +86,7 @@ def _render(resources: list[Resource], outcome, *, show_origins: bool) -> None:
 
         console.print(f"[bold cyan]{i:>2}.[/bold cyan] {head} [dim]· {' · '.join(meta)}[/dim]")
         if res.title:
-            console.print(f"    [white]{_truncate(res.title, 100)}[/white]")
+            console.print(f"    [white]{excerpt(res.title, outcome.keyword, 100)}[/white]")
         console.print(f"    {res.open_url()}")
         if res.pwd:
             console.print(f"    [bold yellow]提取码: {res.pwd}[/bold yellow]")
