@@ -322,6 +322,8 @@ async def probe_domain(
     import urllib.parse
 
     best: ProbeResult | None = None
+    saw_pattern = False          # 找到过可用搜索模板（只是可能没通过价值校验）
+    best_yield = 0
     noise = _garbage()
     for tpl in patterns:
         for term in probe_terms:
@@ -342,16 +344,19 @@ async def probe_domain(
             # 资源站首页本身就列一堆文章，减掉会把 looptorrent/423down 这类误杀。
             # 用"搜索页与首页长度差异"来挡"搜索页=首页"的 JS 站。
             gain = r_hits - n_hits
-            # 只用对照法判定，不再夹一个"搜索页与首页长度差 > 200"的条件：
-            # JS 站（无视查询参数、永远返回同一页）在对照法下 gain 就是 0，
-            # 已经被挡住了；而长度阈值会误杀结果页很短的站。
-            if gain >= min_gain and r_hits != home_hits:
+            # **只用对照法判定**（真词结果数 - 无意义串结果数）。
+            # 不要再夹"与首页比较"的条件：JS 站无视查询参数、永远返回同一页，
+            # gain 本来就是 0 已经被挡住；而与首页比长度/比条目数都太脆 ——
+            # 实测 looptorrent 首页与搜索页的详情链接数恰好相同，就被误杀了。
+            if gain >= min_gain:
                 result_re = derive_result_re(real.text, base)
                 if not result_re:
                     continue
+                saw_pattern = True
                 # 价值校验：跟进几个详情页，看里面到底有没有网盘/磁力链接。
                 # 没有就说明这站不是我们要的类型（在线播放站、字幕站、教程站…）。
                 yield_ = await _measure_link_yield(client, result_re, real.text)
+                best_yield = max(best_yield, yield_)
                 if yield_ <= 0:
                     continue
                 cand = ProbeResult(
@@ -366,7 +371,13 @@ async def probe_domain(
                     # （21 个模板 × 3 个探测词 = 最多 84 次请求/域名，早退能省一大半）
                     if cand.real_hits >= 20 and gain >= 10:
                         return best
-    return best or ProbeResult(domain=host, ok=False, error="no-pattern")
+    if best:
+        return best
+    # 区分两种失败：搜不出结果 vs 搜得出但详情页没有网盘链接（后者常是在线播放/字幕/教程站）
+    return ProbeResult(
+        domain=host, ok=False,
+        error="no-share-links" if saw_pattern else "no-pattern",
+    )
 
 
 def _is_cjk_domain(host: str) -> bool:
@@ -413,7 +424,7 @@ def extract_detail_urls(html: str, result_re: str, base: str = "") -> list[str]:
 
 
 async def _measure_link_yield(client: httpx.AsyncClient, result_re: str,
-                              search_html: str, *, sample: int = 3) -> int:
+                              search_html: str, *, sample: int = 6) -> int:
     """跟进最多 sample 个详情页，统计里面的网盘/磁力链接数。"""
     # 从正则在正文中的位置推不出 base，所以直接用 URL 里的 host
     m = re.match(r"(https?://[^/]+)", result_re)
