@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import html as html_mod
 import re
+import time
 import urllib.parse
 from typing import Any
 
@@ -167,6 +168,18 @@ class ApiSourcesAdapter(Adapter):
     kind = "api"
     primary_only = True        # 走垂直路由，补搜词没必要再打一遍
 
+    def __init__(self, cfg: dict | None = None) -> None:
+        super().__init__(cfg)
+        self._last_call: dict[str, float] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+        self.rate_limited: set[str] = set()      # 本轮被 429 的 API（排查用）
+
+    def _rate_lock(self, name: str) -> asyncio.Lock:
+        lock = self._locks.get(name)
+        if lock is None:
+            lock = self._locks[name] = asyncio.Lock()
+        return lock
+
     @property
     def apis(self) -> list[dict]:
         return self.cfg.get("apis") or _load_apis()
@@ -206,12 +219,26 @@ class ApiSourcesAdapter(Adapter):
         url = str(api.get("url") or "").format(q=urllib.parse.quote(kw))
         if not url:
             return []
+
+        # 限流：arXiv 明确要求每次请求间隔 ≥3 秒，连发会被 429。
+        # 实测被限流时那一发要等 16 秒还返回 0 条 —— 既慢又白等。
+        interval = float(api.get("min_interval") or 0)
+        if interval > 0:
+            async with self._rate_lock(name):
+                wait = interval - (time.monotonic() - self._last_call.get(name, 0.0))
+                if wait > 0:
+                    await asyncio.sleep(min(wait, interval))
+                self._last_call[name] = time.monotonic()
+
         try:
             resp = await client.get(
                 url, timeout=float(api.get("timeout") or 15),
                 headers={"User-Agent": UA, "Accept": "application/json, text/xml, */*"},
             )
         except httpx.HTTPError:
+            return []
+        if resp.status_code == 429:
+            self.rate_limited.add(name)      # 记下来，便于排查"为什么这个 API 没结果"
             return []
         if resp.status_code != 200:
             return []

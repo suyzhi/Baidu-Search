@@ -88,24 +88,48 @@ async def harvest_tgnav(client: httpx.AsyncClient) -> dict[str, list[str]]:
 
 
 async def verify_channel(client: httpx.AsyncClient, sem: asyncio.Semaphore,
-                         channel: str, min_links: int = 1) -> ChannelHit | None:
-    """抓最近一页，只有真含资源链接才收；顺带按内容推断垂直领域。"""
+                         channel: str, min_links: int = 1,
+                         max_pages: int = 3) -> ChannelHit | None:
+    """翻最近几页，只有真含资源链接才收；顺带按内容推断垂直领域。
+
+    为什么要翻多页：只看最近一页会**误杀发链接不频繁的频道** ——
+    有些频道一天只发一两条资源，最近 20 条里可能一条链接都没有，
+    但往前翻一页就有。代价是慢一些，只在第一页没链接时才继续翻。
+    """
+    total_links = 0
+    texts: list[str] = []
+    before: int | None = None
     async with sem:
-        try:
-            resp = await client.get(f"https://t.me/s/{channel}", timeout=12)
-        except httpx.HTTPError:
-            return None
-    if resp.status_code != 200:
+        for page_no in range(max(1, max_pages)):
+            url = f"https://t.me/s/{channel}"
+            if before:
+                url += f"?before={before}"
+            try:
+                resp = await client.get(url, timeout=12)
+            except httpx.HTTPError:
+                break
+            if resp.status_code != 200:
+                break
+            msgs = parse_channel_page(resp.text, channel)
+            if not msgs:
+                break
+            total_links += sum(len(m.links) for m in msgs)
+            texts.extend(m.text for m in msgs[:10])
+            if total_links >= min_links:
+                break                      # 已经够了，不用再翻
+            ids = [m.msg_id for m in msgs if getattr(m, "msg_id", None)]
+            if not ids:
+                break
+            oldest = min(ids)
+            if oldest == before:
+                break
+            before = oldest
+
+    if total_links < min_links:
         return None
-    msgs = parse_channel_page(resp.text, channel)
-    if not msgs:
-        return None
-    links = sum(len(m.links) for m in msgs)
-    if links < min_links:
-        return None
-    text = " ".join(m.text for m in msgs[:10])
+    text = " ".join(texts)
     verticals = classify(text)
-    return ChannelHit(channel=channel, links=links,
+    return ChannelHit(channel=channel, links=total_links,
                       vertical=verticals[0] if verticals else "general")
 
 

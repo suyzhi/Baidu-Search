@@ -180,3 +180,53 @@ def test_direct_pan_type_is_registered():
     assert detect_pan_type("http://arxiv.org/abs/1234.5678") is PanType.DIRECT
     assert detect_pan_type("https://doi.org/10.1/abc") is PanType.DIRECT
     assert detect_pan_type("https://mangadex.org/title/abc") is PanType.DIRECT
+
+
+# ---------------------------------------------------------------- 限流
+def _rate_adapter(min_interval: float) -> ApiSourcesAdapter:
+    return ApiSourcesAdapter({"apis": [
+        {"name": "arxiv", "vertical": "academic", "url": "https://arxiv.test/?q={q}",
+         "format": "xml", "items": "entry", "title": "title", "link": "id",
+         "min_interval": min_interval},
+    ]})
+
+
+async def test_rate_limit_spaces_requests():
+    """回归：arXiv 要求请求间隔 ≥3 秒，连发会被 429。
+    被限流时那一发要等 16 秒还返回 0 条 —— 既慢又白等。"""
+    stamps: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import time as _t
+
+        stamps.append(_t.monotonic())
+        return httpx.Response(200, text=ARXIV_XML)
+
+    a = _rate_adapter(0.25)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        for _ in range(3):
+            await a.search("machine learning", client)
+
+    assert len(stamps) == 3
+    gaps = [b - a_ for a_, b in zip(stamps, stamps[1:])]
+    assert all(g >= 0.2 for g in gaps), f"请求间隔不足: {gaps}"
+
+
+async def test_rate_limit_zero_means_no_delay():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=ARXIV_XML)
+
+    a = _rate_adapter(0)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assert len(await a.search("machine learning", client)) > 0
+
+
+async def test_http_429_is_recorded_and_skipped():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, text="slow down")
+
+    a = _rate_adapter(0)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        hits = await a.search("machine learning", client)
+    assert hits == []
+    assert "arxiv" in a.rate_limited, "被限流要记下来，便于排查为什么这个 API 没结果"

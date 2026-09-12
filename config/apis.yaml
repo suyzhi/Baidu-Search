@@ -25,6 +25,9 @@ apis:
     items: entry
     title: title
     link: id
+    # arXiv 官方要求每次请求间隔 ≥3 秒，连发会被 429。
+    # 被限流时那一发要等 16 秒还返回 0 条 —— 既慢又白等，所以主动限流。
+    min_interval: 3.0
 
   - name: crossref
     vertical: academic
