@@ -183,3 +183,27 @@ def test_instances_default_and_normalized():
 
     adapter2 = PansouAdapter({"instances": ["http://127.0.0.1:8888/", "http://x/"]})
     assert adapter2.instances == ["http://127.0.0.1:8888", "http://x"]
+
+
+# ---------------------------------------------------------------- 宽松 JSON 解析
+def test_loads_lenient_handles_invalid_utf8():
+    """回归：某些关键词（如「三体」）的响应里混了非法 UTF-8 字节，
+    resp.json() 抛的 UnicodeDecodeError 是 ValueError 的子类，
+    原代码把它归为"非 JSON 响应"，于是**一个坏字节让整个 PanSou 源失效**。
+    实测「三体」修好后从 0 条变成 386 条。"""
+    from pansearch.adapters.pansou import _loads_lenient
+
+    bad = b'{"data":{"merged_by_type":{"baidu":[{"url":"https://pan.baidu.com/s/1x","note":"' \
+          + bytes([0xE8, 0x20]) + b'"}]}}}'
+    got = _loads_lenient(bad)
+    assert got is not None, "坏字节不该让整份响应作废"
+    assert "data" in got
+    assert got["data"]["merged_by_type"]["baidu"][0]["url"].endswith("/1x")
+
+
+def test_loads_lenient_normal_and_garbage():
+    from pansearch.adapters.pansou import _loads_lenient
+
+    assert _loads_lenient(b'{"a": 1}') == {"a": 1}
+    assert _loads_lenient(b"not json at all") is None
+    assert _loads_lenient(b"") is None

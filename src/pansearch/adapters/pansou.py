@@ -23,6 +23,28 @@ from .base import Adapter, register
 DEFAULT_INSTANCES = ["https://so.252035.xyz"]
 
 
+def _loads_lenient(content: bytes) -> dict | None:
+    """宽松解析 JSON。
+
+    实测某些关键词（如「三体」）的响应里混了非法 UTF-8 字节，
+    `resp.json()` 会抛 UnicodeDecodeError —— 它是 ValueError 的子类，
+    原代码把它归为"非 JSON 响应"，于是**一个坏字节让整个 PanSou 源失效**。
+    这里按 UTF-8 宽松解码（坏字节替换掉），能取回多少算多少，而不是整源丢弃。
+    """
+    import json
+
+    try:
+        return json.loads(content)
+    except (ValueError, UnicodeDecodeError):
+        pass
+    for encoding in ("utf-8", "gb18030"):
+        try:
+            return json.loads(content.decode(encoding, errors="replace"))
+        except ValueError:
+            continue
+    return None
+
+
 @register
 class PansouAdapter(Adapter):
     name = "pansou"
@@ -48,10 +70,10 @@ class PansouAdapter(Adapter):
                 last_err = str(exc)
             else:
                 if resp.status_code == 200:
-                    try:
-                        return resp.json()
-                    except ValueError:
-                        last_err = "非 JSON 响应"
+                    payload = _loads_lenient(resp.content)
+                    if payload is not None:
+                        return payload
+                    last_err = "非 JSON 响应"
                 else:
                     last_err = f"HTTP {resp.status_code}"
             if attempt < retries:
