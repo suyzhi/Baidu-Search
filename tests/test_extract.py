@@ -1,0 +1,70 @@
+"""链接 / 提取码抽取测试（含两个已修复的真实 bug 的回归测试）。"""
+
+from __future__ import annotations
+
+from pansearch.extract import extract_from_text, html_to_text, page_title
+
+
+def _hits(text: str):
+    return extract_from_text(text, source="t", kind="websearch")
+
+
+def test_basic_link_and_pwd():
+    hits = _hits("资源：三体 链接 https://pan.baidu.com/s/1etZdVXAv3tJBuk42BpmujA 提取码: hvdw")
+    assert len(hits) == 1
+    assert hits[0].url == "https://pan.baidu.com/s/1etZdVXAv3tJBuk42BpmujA"
+    assert hits[0].pwd == "hvdw"
+
+
+def test_pwd_left_of_link():
+    hits = _hits("提取码 a1b2 链接 https://pan.baidu.com/s/1QqWwEeRrTtYy")
+    assert hits[0].pwd == "a1b2"
+
+
+def test_pwd_does_not_leak_across_links():
+    """回归：第 1 个链接的提取码绝不能串到第 2 个链接上。"""
+    text = (
+        "https://pan.baidu.com/s/1AAAAAAAAAAAA 提取码: aaaa "
+        "另一个 https://pan.baidu.com/s/1BBBBBBBBBBBB"
+    )
+    hits = {h.url.split("/")[-1]: h.pwd for h in _hits(text)}
+    assert hits["1AAAAAAAAAAAA"] == "aaaa"
+    assert hits["1BBBBBBBBBBBB"] is None
+
+
+def test_fullwidth_paren_not_swallowed_into_url():
+    """回归：全角括号不能被吃进 URL。"""
+    hits = _hits("https://pan.quark.cn/s/251cd20497e6（密码 8x2k）")
+    assert hits[0].url == "https://pan.quark.cn/s/251cd20497e6"
+    assert hits[0].pwd == "8x2k"
+
+
+def test_pwd_in_url_query():
+    hits = _hits("看看 https://pan.baidu.com/s/1CCCCCCCCCCC?pwd=zz99 吧")
+    assert hits[0].pwd == "zz99"
+
+
+def test_multiple_links_each_get_own_pwd():
+    text = "https://pan.baidu.com/s/1BBBBBBBBBBB?pwd=1111 和 https://pan.baidu.com/s/1CCCCCCCCCCC?pwd=2222"
+    hits = _hits(text)
+    assert len(hits) == 2
+    assert [h.pwd for h in hits] == ["1111", "2222"]
+
+
+def test_skips_unparseable_baidu_link():
+    # share/link?shareid= 无法解析出 surl，无法验活也无法去重 -> 丢弃
+    assert _hits("https://pan.baidu.com/share/link?shareid=123&uk=456") == []
+
+
+def test_pwd_hint_fallback():
+    hits = extract_from_text(
+        "https://pan.baidu.com/s/1DDDDDDDDDDD", source="s", kind="pansou", pwd_hint="kkkk"
+    )
+    assert hits[0].pwd == "kkkk"
+
+
+def test_html_to_text_and_title():
+    html = "<html><head><title>三体 资源帖</title></head><body><p>链接<br>https://pan.baidu.com/s/1EEEEEEEEEE</p></body></html>"
+    assert page_title(html) == "三体 资源帖"
+    hits = extract_from_text(html_to_text(html), source="s", kind="t")
+    assert len(hits) == 1

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pansearch · 全网网盘资源搜索器</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2a3240;
+    --fg:#e6edf3; --dim:#8b949e; --accent:#37c9a0; --accent2:#2f81f7;
+    --green:#3fb950; --yellow:#d29922; --red:#f85149;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  a{color:var(--accent2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 80px}
+  header{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+  h1{font-size:22px;margin:0;letter-spacing:.5px}
+  h1 span{color:var(--accent)}
+  .tagline{color:var(--dim);font-size:13px}
+
+  .searchbar{display:flex;gap:10px;margin:22px 0 14px}
+  input[type=text]{flex:1;padding:14px 16px;font-size:16px;border-radius:10px;
+    border:1px solid var(--border);background:var(--panel);color:var(--fg);outline:none}
+  input[type=text]:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(55,201,160,.15)}
+  button{padding:14px 26px;font-size:15px;font-weight:600;border-radius:10px;border:0;
+    background:var(--accent);color:#05221a;cursor:pointer}
+  button:hover{filter:brightness(1.1)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+
+  .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:18px}
+  .chip{padding:6px 13px;border-radius:999px;border:1px solid var(--border);
+    background:var(--panel);color:var(--dim);font-size:13px;cursor:pointer;user-select:none}
+  .chip.on{background:rgba(55,201,160,.15);border-color:var(--accent);color:var(--accent)}
+  .chip.pri.on{background:rgba(47,129,247,.18);border-color:var(--accent2);color:#79c0ff}
+  label.toggle{display:flex;align-items:center;gap:6px;color:var(--dim);font-size:13px;cursor:pointer}
+
+  .stats{padding:12px 16px;border:1px solid var(--border);border-radius:10px;
+    background:var(--panel);color:var(--dim);font-size:13px;margin-bottom:18px;display:none}
+  .stats.show{display:block}
+  .stats b{color:var(--fg)}
+
+  .card{border:1px solid var(--border);border-radius:12px;background:var(--panel);
+    padding:16px 18px;margin-bottom:12px}
+  .card.dead{opacity:.45}
+  .card-top{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}
+  .title{font-weight:600;font-size:15px;word-break:break-word}
+  .badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+  .badge{font-size:12px;padding:2px 9px;border-radius:6px;background:var(--panel2);
+    color:var(--dim);border:1px solid var(--border);white-space:nowrap}
+  .badge.ok{color:var(--green);border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.1)}
+  .badge.warn{color:var(--yellow);border-color:rgba(210,153,34,.4);background:rgba(210,153,34,.1)}
+  .badge.bad{color:var(--red);border-color:rgba(248,81,73,.4);background:rgba(248,81,73,.1)}
+  .badge.pan{color:#79c0ff;border-color:rgba(47,129,247,.4);background:rgba(47,129,247,.1)}
+
+  .linkrow{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .link{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+    color:var(--accent);word-break:break-all;flex:1;min-width:260px}
+  .pwd{font-family:ui-monospace,Menlo,monospace;font-weight:700;color:var(--yellow);
+    background:rgba(210,153,34,.12);padding:3px 10px;border-radius:6px;border:1px solid rgba(210,153,34,.3)}
+  .mini{padding:5px 11px;font-size:12px;font-weight:600;border-radius:7px;
+    background:var(--panel2);color:var(--fg);border:1px solid var(--border);cursor:pointer}
+  .mini:hover{border-color:var(--accent);color:var(--accent)}
+  .note{margin-top:9px;font-size:12px;color:var(--dim)}
+  .empty{text-align:center;color:var(--dim);padding:50px 0}
+  .spinner{display:inline-block;width:13px;height:13px;border:2px solid var(--dim);
+    border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;
+    vertical-align:-2px;margin-right:7px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(80px);
+    background:var(--accent);color:#05221a;padding:10px 22px;border-radius:10px;
+    font-weight:600;font-size:14px;transition:transform .25s;z-index:99}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+  footer{margin-top:34px;color:var(--dim);font-size:12px;line-height:1.9;
+    border-top:1px solid var(--border);padding-top:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>pan<span>search</span></h1>
+    <div class="tagline">全网网盘资源搜索器 · 百度优先 · 带链接有效性校验</div>
+  </header>
+
+  <div class="searchbar">
+    <input type="text" id="kw" placeholder="输入关键词，例如：三体 / 周杰伦 / Python编程" autocomplete="off">
+    <button id="go">搜索</button>
+  </div>
+
+  <div class="filters" id="typeFilters">
+    <span class="chip pri on" data-type="">全部</span>
+    <span class="chip" data-type="baidu">百度网盘</span>
+    <span class="chip" data-type="quark">夸克</span>
+    <span class="chip" data-type="aliyun">阿里云盘</span>
+    <span class="chip" data-type="115">115</span>
+    <span class="chip" data-type="xunlei">迅雷</span>
+    <span class="chip" data-type="tianyi">天翼</span>
+    <span class="chip" data-type="123">123网盘</span>
+    <span class="chip" data-type="uc">UC</span>
+    <span class="chip" data-type="magnet">磁力</span>
+    <label class="toggle"><input type="checkbox" id="aliveOnly" checked> 只看存活</label>
+    <label class="toggle"><input type="checkbox" id="doVerify" checked> 校验链接</label>
+  </div>
+
+  <div class="stats" id="stats"></div>
+  <div id="results"></div>
+
+  <footer>
+    <div>⚠️ 本工具仅做<b>公开链接的检索与索引</b>，不下载、不存储、不破解、不绕过验证码。搜索结果均来自第三方公开索引，请自行判断合法性与版权。</div>
+    <div>数据源：PanSou 聚合引擎（48 插件 + TG 频道）｜ Brave / 360 搜索引擎定向检索</div>
+  </footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const resultsEl = $('#results'), statsEl = $('#stats'), goBtn = $('#go');
+let activeType = '';
+
+document.querySelectorAll('#typeFilters .chip').forEach(chip => {
+  chip.onclick = () => {
+    document.querySelectorAll('#typeFilters .chip').forEach(c => c.classList.remove('on'));
+    chip.classList.add('on');
+    activeType = chip.dataset.type;
+    if ($('#kw').value.trim()) doSearch();
+  };
+});
+
+$('#kw').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+goBtn.onclick = doSearch;
+$('#aliveOnly').onchange = () => { if ($('#kw').value.trim()) doSearch(); };
+
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function toast(msg){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1400);
+}
+
+function copy(text, label){
+  navigator.clipboard.writeText(text).then(
+    () => toast('已复制' + label),
+    () => toast('复制失败，请手动选择')
+  );
+}
+
+function statusClass(s){
+  if (s === 'alive' || s === 'need_pwd') return 'ok';
+  if (s === 'wrong_pwd' || s === 'unknown') return 'warn';
+  if (s === 'dead' || s === 'not_found') return 'bad';
+  return '';
+}
+
+async function doSearch(){
+  const kw = $('#kw').value.trim();
+  if (!kw) return;
+  goBtn.disabled = true;
+  resultsEl.innerHTML = '<div class="empty"><span class="spinner"></span>正在并发检索全网数据源并校验链接有效性…</div>';
+  statsEl.classList.remove('show');
+
+  const params = new URLSearchParams({kw, limit: 100,
+    alive_only: $('#aliveOnly').checked, verify: $('#doVerify').checked});
+  if (activeType) params.set('types', activeType);
+
+  const t0 = Date.now();
+  try{
+    const resp = await fetch('/api/search?' + params);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    render(await resp.json(), ((Date.now() - t0) / 1000).toFixed(1));
+  }catch(err){
+    resultsEl.innerHTML = '<div class="empty">搜索失败：' + esc(err.message) + '</div>';
+  }finally{
+    goBtn.disabled = false;
+  }
+}
+
+function render(data, secs){
+  const parts = [];
+  parts.push('原始命中 <b>' + data.raw_hits + '</b>');
+  parts.push('去重 <b>' + data.dedup_count + '</b>');
+  parts.push('显示 <b>' + data.shown + '</b>');
+  parts.push('存活 <b>' + data.alive_count + '</b>');
+  const vs = data.verify_stats || {};
+  if (vs.checked !== undefined) {
+    parts.push('验活请求 <b>' + (vs.checked || 0) + '</b>（缓存命中 ' + (vs.cache_hit || 0) + '）');
+  }
+  parts.push('耗时 <b>' + secs + 's</b>');
+  parts.push('数据源 <b>' + (data.used_sources || []).join(' + ') + '</b>');
+
+  let html = parts.join(' ｜ ');
+  const errs = Object.entries(data.errors || {});
+  if (errs.length) {
+    html += '<br><span style="color:var(--yellow)">⚠ ' +
+      errs.map(([k, v]) => esc(k) + '：' + esc(String(v).slice(0, 120))).join('<br>⚠ ') + '</span>';
+  }
+  statsEl.innerHTML = html;
+  statsEl.classList.add('show');
+
+  if (!data.results.length){
+    resultsEl.innerHTML = '<div class="empty">没有找到结果。<br>试试换个关键词，或取消「只看存活」。</div>';
+    return;
+  }
+
+  resultsEl.innerHTML = data.results.map(r => {
+    const sc = statusClass(r.status);
+    const badges = [
+      '<span class="badge ' + sc + '">' + esc(r.status_label) + '</span>',
+      '<span class="badge pan">' + esc(r.pan_label) + '</span>'
+    ];
+    if (r.hit_count > 1) badges.push('<span class="badge">命中 ' + r.hit_count + ' 次</span>');
+    if (r.size) badges.push('<span class="badge">' + esc(r.size) + '</span>');
+    if (r.shared_at) badges.push('<span class="badge">' + esc(r.shared_at) + '</span>');
+    (r.sources || []).slice(0, 3).forEach(s => badges.push('<span class="badge">' + esc(s) + '</span>'));
+
+    const origin = (r.origins || [])[0];
+    return '<div class="card' + (r.alive ? '' : ' dead') + '">' +
+      '<div class="card-top"><div class="title">' + (esc(r.title) || '<span style="color:var(--dim)">（无标题）</span>') + '</div></div>' +
+      '<div class="badges">' + badges.join('') + '</div>' +
+      '<div class="linkrow">' +
+        '<a class="link" href="' + esc(r.url) + '" target="_blank" rel="noopener">' + esc(r.url) + '</a>' +
+        (r.pwd ? '<span class="pwd">' + esc(r.pwd) + '</span>' : '') +
+        '<button class="mini" data-copy="' + esc(r.copy_text) + '">复制链接' + (r.pwd ? ' + 提取码' : '') + '</button>' +
+        '<a class="mini" href="' + esc(r.url) + '" target="_blank" rel="noopener">打开</a>' +
+      '</div>' +
+      (r.note ? '<div class="note">' + esc(r.note) + '</div>' : '') +
+      (origin ? '<div class="note">来源页：<a href="' + esc(origin) + '" target="_blank" rel="noopener">' + esc(origin.slice(0, 96)) + '</a></div>' : '') +
+    '</div>';
+  }).join('');
+
+  resultsEl.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.onclick = () => copy(btn.dataset.copy, '链接');
+  });
+}
+
+$('#kw').focus();
+</script>
+</body>
+</html>

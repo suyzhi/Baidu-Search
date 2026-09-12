@@ -1,0 +1,30 @@
+[project]
+name = "pansearch"
+version = "0.1.0"
+description = "全网网盘资源搜索器（百度优先 + 全类型兜底），带链接有效性校验"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx[http2]>=0.27",
+    "pydantic>=2.7",
+    "typer>=0.12",
+    "rich>=13.7",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+web = ["fastapi>=0.111", "uvicorn>=0.30", "jinja2>=3.1"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+pansearch = "pansearch.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pansearch"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

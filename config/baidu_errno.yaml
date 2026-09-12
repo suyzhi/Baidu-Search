@@ -1,0 +1,36 @@
+# 百度网盘接口 errno 码表
+# 实测校准日期：2026-09-12（真实链接 + 随机伪造 token 交叉验证）
+#
+# ⚠️ 最容易踩的坑：两个接口要求的 surl 形式**相反**，用错就得到假阳性/假阴性。
+#
+#   shorturlinfo   用【完整 token（带开头 1）】-> 真实=-9 / 伪造=140  ← 有区分度
+#                  用【去掉开头 1】          -> 恒返回 2            ← 无区分度，假阳性！
+#   share/verify   必须用【去掉开头 1】      -> 0=码对 / -12=码错 / 105=不存在
+#
+# 接口变动时只改这个文件，不用改代码。
+
+shorturlinfo:
+  # GET https://pan.baidu.com/api/shorturlinfo?shorturl=<完整token>&web=1
+  #     &app_id=250528&channel=chunlei&clienttype=0&t=<ms>
+  token_form: full        # full = 保留开头那个 1
+  "0": alive              # 存活，无需提取码
+  "-9": need_pwd          # 存活，需要提取码
+  "-21": need_pwd         # 存活（实测真链接返回此值，且 share/verify=0）
+  "140": not_found        # 链接不存在（伪造 token 的典型返回）
+  "-3": dead              # 分享已失效 / token 格式非法
+
+share_verify:
+  # POST https://pan.baidu.com/share/verify?surl=<去掉开头1>&t=<ms>
+  #      &channel=chunlei&web=1&app_id=250528&clienttype=0
+  # Referer: https://pan.baidu.com/share/init?surl=<去掉开头1>
+  # body: pwd=<提取码>&vcode=&vcode_str=
+  #
+  # 实测（3 条存活链接 × 每码 3 次）：正确码 3/3 返回 0，错误码 9/9 返回 -9，伪造链接 105。
+  token_form: strip_one
+  "0": alive              # 提取码正确，返回 randsk
+  "-9": wrong_pwd         # 提取码错误（链接本身可能仍然存活）
+  "-12": wrong_pwd        # 视为码错，交由 shorturlinfo 兜底判定链接是否还在
+  "105": not_found        # 分享不存在 / 已失效
+
+# 未知 errno 的默认判定（保守：不宣称失效，也不宣称有效）
+default: unknown

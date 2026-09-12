@@ -1,0 +1,89 @@
+# 数据源配置：开关 / 权重 / 限速
+# 新增一个数据源 = 写一个 adapters/xxx.py + 在这里加一段
+
+# 百度优先，其余网盘兜底
+pan_priority:
+  - baidu
+  - quark
+  - aliyun
+  - "115"
+  - xunlei
+  - tianyi
+  - "123"
+  - uc
+  - pikpak
+  - magnet
+
+sources:
+  pansou:
+    enabled: true
+    kind: pansou
+    # 公共实例（M1 先用它；M4 自建后改成本地地址，如 http://127.0.0.1:8888）
+    instances:
+      - https://so.252035.xyz
+    # 实测公共实例会偶发 400 / timeout，故多实例 + 重试
+    weight: 1.0
+    timeout: 30
+    retries: 2
+    concurrency: 2
+    rate_limit_qps: 1.5
+
+  # ---- B 环：搜索引擎定向检索（捞聚合站搜不到的"野链接"）----
+  # 两阶段：先搜到"资源讨论页"，再抓这些页面抽网盘链接。
+  # 实测：绝大多数引擎不索引 pan.baidu.com/s 本身，但索引讨论页 → 必须两阶段。
+  # brave 直接命中最多但会 429；so 备用。
+  websearch:
+    enabled: true
+    kind: websearch
+    weight: 0.6
+    timeout: 25
+    concurrency: 2
+    rate_limit_qps: 0.4         # brave 429 敏感，间隔给足
+    fetch_result_pages: true    # 阶段 2：抓内容页（大幅提升召回）
+    max_pages: 6
+    page_timeout: 12
+    page_concurrency: 4
+    engines:
+      brave: "https://search.brave.com/search?q={q}"
+      so: "https://www.so.com/s?q={q}"
+    templates:
+      - 'site:pan.baidu.com/s {kw}'
+      - '"{kw}" 百度网盘 提取码'
+      - '"{kw}" 百度网盘 下载 提取码'
+
+  bilibili:
+    enabled: false
+    kind: bilibili
+    weight: 0.8
+    timeout: 20
+    concurrency: 2
+    rate_limit_qps: 1.0
+    fetch_comments: true
+
+verify:
+  enabled: true
+  concurrency: 4
+  rate_limit_qps: 3.0     # 对 pan.baidu.com 温柔一点
+  cache_ttl_hours: 6
+  timeout: 20
+  retries: 2
+
+scoring:
+  kind_weight:
+    pansou: 1.0
+    tg: 0.9
+    bilibili: 0.8
+    forum: 0.8
+    websearch: 0.6
+  status_weight:
+    alive: 1.0            # 提取码已验证正确
+    need_pwd: 0.8         # 存活，需提取码
+    wrong_pwd: 0.5        # 存活但码不对
+    unchecked: 0.6
+    unsupported: 0.6      # 非百度，未校验
+    unknown: 0.3
+    dead: 0.02
+    not_found: 0.0
+  multi_source_bonus: 0.25   # 多源命中加成（每条额外来源）
+  freshness_halflife_days: 730
+  pan_priority_bonus: 0.3    # 百度优先
