@@ -101,7 +101,7 @@ _DETAIL_RE = re.compile(r'href="(?:https?://[^/"]+)?(/[^"#?]{3,})"')
 # WordPress 风格 slug，允许一层栏目前缀：
 #   /amazound-ppg-storm-for-kontakt/   （无前缀）
 #   /comic/santi-huanchuangweilai      （/comic 前缀）—— 之前只认单段，漏掉一大批站
-_SLUG_RE = re.compile(r"^/(?:[a-z0-9-]+/)?[a-z0-9]+(?:-[a-z0-9]+){1,}/?$")
+_SLUG_RE = re.compile(r"^/(?:[a-z0-9_-]+/)?[a-z0-9]+(?:[-_][a-z0-9]+){1,}/?$")
 
 
 def count_result_links(html: str) -> int:
@@ -167,10 +167,30 @@ def _path_shape(path: str) -> str | None:
         if ch == _PH_DIGIT:
             out.append(r"\d+")
         elif ch == _PH_WORD:
-            out.append("[a-z0-9-]+")
+            # 必须含下划线：实测 dmhy 的 slug 是 725310_Fushigi_Yugi_TV_1989...
+            # 少了 _ 会在第一个下划线处断掉，整条正则匹配不到任何详情页
+            out.append("[a-z0-9_-]+")
         else:
             out.append(re.escape(ch))
     return "".join(out) + ext
+
+
+def derive_result_candidates(html: str, base: str, top: int = 3) -> list[str]:
+    """返回按出现次数排序的**多个**详情页正则候选。
+
+    为什么要多个：页面上"最常见的形状"未必是详情页。实测 dmhy 的搜索页里
+    分类列表链接（/topics/list/sort_id/2）比真正的详情页
+    （/topics/view/xxxx_title.html）更多，只取最常见的那一个就会指向列表页，
+    于是被判成"没有网盘链接"。多个候选各自试一下产出，取最高的那个。
+    """
+    shapes: dict[str, int] = {}
+    for path in _DETAIL_RE.findall(html):
+        shape = _path_shape(path)
+        if shape:
+            shapes[shape] = shapes.get(shape, 0) + 1
+    host = re.escape(base.replace("https://", "").replace("http://", "").rstrip("/"))
+    ranked = sorted(shapes.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [f"https://{host}{shape}" for shape, _ in ranked[:top]]
 
 
 def derive_result_re(html: str, base: str) -> str:
@@ -349,13 +369,20 @@ async def probe_domain(
             # gain 本来就是 0 已经被挡住；而与首页比长度/比条目数都太脆 ——
             # 实测 looptorrent 首页与搜索页的详情链接数恰好相同，就被误杀了。
             if gain >= min_gain:
-                result_re = derive_result_re(real.text, base)
-                if not result_re:
+                shapes = derive_result_candidates(real.text, base, top=2)
+                if not shapes:
                     continue
                 saw_pattern = True
                 # 价值校验：跟进几个详情页，看里面到底有没有网盘/磁力链接。
-                # 没有就说明这站不是我们要的类型（在线播放站、字幕站、教程站…）。
-                yield_ = await _measure_link_yield(client, result_re, real.text)
+                # 对**多个形状**分别取样，取产出最高的那个 —— 页面上最常见的形状
+                # 未必是详情页（dmhy 的分类列表链接就比详情页多）。
+                result_re, yield_ = "", 0
+                for shape in shapes:
+                    y = await _measure_link_yield(client, shape, real.text)
+                    if y > yield_:
+                        result_re, yield_ = shape, y
+                    if yield_ >= 5:
+                        break
                 best_yield = max(best_yield, yield_)
                 if yield_ <= 0:
                     continue
@@ -424,7 +451,7 @@ def extract_detail_urls(html: str, result_re: str, base: str = "") -> list[str]:
 
 
 async def _measure_link_yield(client: httpx.AsyncClient, result_re: str,
-                              search_html: str, *, sample: int = 6) -> int:
+                              search_html: str, *, sample: int = 4) -> int:
     """跟进最多 sample 个详情页，统计里面的网盘/磁力链接数。"""
     # 从正则在正文中的位置推不出 base，所以直接用 URL 里的 host
     m = re.match(r"(https?://[^/]+)", result_re)

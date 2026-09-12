@@ -58,12 +58,12 @@ def test_every_vertical_has_keywords():
 @pytest.mark.parametrize(
     "path,expected",
     [
-        ("/bilibilispxzq.html", r"/[a-z0-9-]+\.html"),
+        ("/bilibilispxzq.html", r"/[a-z0-9_-]+\.html"),
         ("/15884.html", r"/\d+\.html"),
-        ("/amazound-ppg-storm-for-kontakt/", r"/[a-z0-9-]+/"),
+        ("/amazound-ppg-storm-for-kontakt/", r"/[a-z0-9_-]+/"),
         # slug 里混数字也不能被切碎（先替换单词、再替换纯数字）
-        ("/luftrum-chronos-for-omnisphere-3-omnisphere-3/", r"/[a-z0-9-]+/"),
-        ("/archives/1234", r"/[a-z0-9-]+/\d+"),
+        ("/luftrum-chronos-for-omnisphere-3-omnisphere-3/", r"/[a-z0-9_-]+/"),
+        ("/archives/1234", r"/[a-z0-9_-]+/\d+"),
     ],
 )
 def test_path_shape(path, expected):
@@ -83,7 +83,7 @@ def test_derive_result_re_picks_dominant_shape():
     <a href="/another-serum-bank/">3</a>
     """
     got = derive_result_re(html, "https://looptorrent.net")
-    assert got == r"https://looptorrent\.net/[a-z0-9-]+/"
+    assert got == r"https://looptorrent\.net/[a-z0-9_-]+/"
 
 
 def test_derive_result_re_empty_when_no_detail_links():
@@ -103,11 +103,11 @@ def test_catalog_roundtrip(tmp_path):
     path = tmp_path / "sites.yaml"
     sites = [
         SiteEntry(name="ghxi", domain="www.ghxi.com", search="https://www.ghxi.com/?s={q}",
-                  result_re=r"https://www\.ghxi\.com/[a-z0-9-]+\.html",
+                  result_re=r"https://www\.ghxi\.com/[a-z0-9_-]+\.html",
                   verticals=["software"], verified=True),
         SiteEntry(name="looptorrent", domain="looptorrent.net",
                   search="https://looptorrent.net/?s={q}",
-                  result_re=r"https://looptorrent\.net/[a-z0-9-]+/",
+                  result_re=r"https://looptorrent\.net/[a-z0-9_-]+/",
                   verticals=["audio-tool", "music"], verified=True),
     ]
     save_catalog(sites, path)
@@ -115,7 +115,7 @@ def test_catalog_roundtrip(tmp_path):
     assert {e.host for e in loaded} == {"www.ghxi.com", "looptorrent.net"}
     ghxi = next(e for e in loaded if e.host == "www.ghxi.com")
     assert ghxi.verticals == ["software"] and ghxi.verified
-    assert ghxi.result_re == r"https://www\.ghxi\.com/[a-z0-9-]+\.html"
+    assert ghxi.result_re == r"https://www\.ghxi\.com/[a-z0-9_-]+\.html"
 
 
 def test_catalog_missing_file_is_empty(tmp_path):
