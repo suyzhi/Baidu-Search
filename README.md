@@ -374,7 +374,7 @@ pan-sousuo/
 │   ├── cli.py                # CLI
 │   ├── webapp.py             # Web API
 │   └── web/index.html        # 单页 UI（零构建）
-└── tests/                    # 130 个离线测试
+└── tests/                    # 280 个离线测试
 ```
 
 ### 加一个新数据源
@@ -460,7 +460,7 @@ fetch_deadline: 15             # 各源缺省超时（可被源自己的 deadlin
 ## 开发
 
 ```bash
-.venv/bin/python -m pytest -q        # 130 个测试，全离线，2 秒跑完
+.venv/bin/python -m pytest -q        # 280 个测试，全离线，十几秒跑完
 ```
 
 测试锁住了几个关键结论（token 形式、errno 码表、提取码不串味、缓存键带提取码、状态权重是乘法），改动这些逻辑时会立刻报警。
