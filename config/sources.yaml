@@ -18,16 +18,18 @@ sources:
   pansou:
     enabled: true
     kind: pansou
-    # 公共实例（M4 自建后改成本地地址，如 http://127.0.0.1:8888）
+    # 自建实例优先（scripts/start-pansou.sh 一键起 Docker）：
+    #   实测「三体」自建 374 条（百度 28）vs 公共 41 条（百度 1）；
+    #   热缓存 0.17s，冷启动 8~30s。公共实例作兜底。
     instances:
+      - http://127.0.0.1:8888
       - https://so.252035.xyz
-    # 实测公共实例会偶发 400 / timeout / 429，故多实例 + 重试 + 短超时快速失败
     weight: 1.0
-    timeout: 15
-    deadline: 25          # 插件覆盖是 TG 没有的，给它足够时间
-    retries: 1
+    timeout: 35
+    deadline: 45          # 冷启动要加载全部插件，给足时间（热缓存仅 0.2s）
+    retries: 0            # 自建实例失败就直接降级到公共实例，不必重试
     concurrency: 2
-    rate_limit_qps: 1.5
+    rate_limit_qps: 5.0
 
   # ---- C 环：Telegram 频道（本地索引直连）----
   # 全网网盘链接的主要产地。直连 t.me，不经第三方，可并行上百频道 + 向历史翻页。
