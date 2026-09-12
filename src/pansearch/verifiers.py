@@ -352,6 +352,18 @@ class VerifierPool:
 
     # ---- 单个资源 ----
     async def verify(self, res: Resource, *, use_cache: bool = True) -> VerifyResult:
+        if res.pan_type is PanType.DIRECT:
+            # API 直链（arXiv / Crossref / OpenAlex / MangaDex 等）是接口**直接返回**的，
+            # 本身就代表资源存在，没有什么可"验活"的。
+            # 若按"不支持验活"处理，它们会被排到所有网盘链接后面 ——
+            # 实测学术查询里 12 条直链全沉在 200 条之后。
+            result = VerifyResult(status=Status.ALIVE, method="api",
+                                  note="API 直链，无需验活")
+            res.verify = result
+            self._tally(result.status)
+            self._bump("api", result.status)
+            return result
+
         if res.pan_type is PanType.BAIDU:
             result = await self.baidu.verify(res, use_cache=use_cache)
             self._tally(result.status, cached=self._was_cached(result))

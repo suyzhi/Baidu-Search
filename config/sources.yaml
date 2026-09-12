@@ -48,6 +48,19 @@ sources:
     channels_file: null       # 默认 config/tg_channels.txt
     index_path: null          # 默认 .cache/tg_index.sqlite3
 
+  # ---- 公开 API 数据源（学术 / 漫画 / 公版书）----
+  # 这两个领域用 HTTP 爬页面基本爬不到：实测 Gutenberg / libgen.li /
+  # manhuagui / dm5 / manhuaren 的搜索页只返回导航链接（JS 渲染），
+  # 抽不到任何条目，价值校验也因此判它们"无产出"。
+  # 但它们有公开 API —— 结构化、稳定、不用解析 HTML。站点清单见 config/apis.yaml。
+  apisources:
+    enabled: true
+    kind: api
+    weight: 0.7
+    deadline: 25
+    # apis 留空则读 config/apis.yaml
+    apis: null
+
   # ---- 垂直资源站（音乐制作插件 / 软件类资源）----
   # 影视剧的网盘链接直接贴在 TG 里，但 VST/音源/桌面软件不是 ——
   # 实测 Serum / Omnisphere / 大气合成器 在 21 万条 TG 索引里是 0 条，
@@ -143,6 +156,10 @@ scoring:
   kind_weight:
     pansou: 1.0
     tg: 0.9
+    # API 直链（arXiv/Crossref/OpenAlex/MangaDex）是结构化来源，可信度高。
+    # 漏配这一项会掉到默认 0.6 —— 实测学术查询里直链会被"侵略机器 War Machine"
+    # 这种只命中了 "machine" 的网盘结果压下去。
+    api: 0.95
     bilibili: 0.8
     forum: 0.8
     websearch: 0.6

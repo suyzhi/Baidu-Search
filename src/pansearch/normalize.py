@@ -60,6 +60,20 @@ _HOST_RULES: list[tuple[str, PanType]] = [
     ("drive.uc.cn", PanType.UC),
     ("mypikpak.com", PanType.PIKPAK),
     ("pikpak.me", PanType.PIKPAK),
+    # 直链资源（API 来源）：文献 / 漫画 / 公版书。
+    # 学术与漫画爬页面基本爬不到（JS 渲染/反爬），但 arXiv / Crossref / OpenAlex /
+    # MangaDex 都有公开 API —— 把这些结果当一等资源收进来，
+    # 否则这两个垂直领域永远是空的。
+    ("arxiv.org", PanType.DIRECT),
+    ("doi.org", PanType.DIRECT),
+    ("openalex.org", PanType.DIRECT),
+    ("crossref.org", PanType.DIRECT),
+    ("mangadex.org", PanType.DIRECT),
+    ("gutenberg.org", PanType.DIRECT),
+    ("standardebooks.org", PanType.DIRECT),
+    ("openlibrary.org", PanType.DIRECT),
+    ("libgen.", PanType.DIRECT),
+    ("sci-hub.", PanType.DIRECT),
 ]
 
 PWD_KEYWORDS = (

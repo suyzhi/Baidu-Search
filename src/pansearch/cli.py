@@ -535,23 +535,40 @@ def sites_coverage() -> None:
     finally:
         index.close()
 
+    # API 数据源（学术/漫画等爬不到页面的领域靠它们）
+    from .adapters.apisources import _load_apis
+
+    apis_by_v: dict[str, int] = {}
+    for api in _load_apis():
+        for v in str(api.get("vertical") or "").split(","):
+            v = v.strip()
+            if v:
+                apis_by_v[v] = apis_by_v.get(v, 0) + 1
+
     table = Table(box=box.SIMPLE, header_style="bold cyan")
     table.add_column("垂直领域")
     table.add_column("资源站", justify="right")
+    table.add_column("API", justify="right")
     table.add_column("TG 频道", justify="right")
     table.add_column("状态")
     for v in list(VERTICAL_KEYWORDS) + ["general"]:
         n_sites = sites_by_v.get(v, 0)
+        n_api = apis_by_v.get(v, 0)
         n_ch = tagged.get(v, 0)
-        ok = n_sites or n_ch
+        kinds = sum(1 for n in (n_sites, n_api, n_ch) if n)
+        state = ("[green]✓[/green]" if kinds >= 2
+                 else ("[yellow]偏薄[/yellow]" if kinds == 1 else "[red]缺[/red]"))
         table.add_row(
-            v, str(n_sites) if n_sites else "-", str(n_ch) if n_ch else "-",
-            "[green]✓[/green]" if n_sites and n_ch else ("[yellow]偏薄[/yellow]" if ok else "[red]缺[/red]"),
+            v,
+            str(n_sites) if n_sites else "-",
+            str(n_api) if n_api else "-",
+            str(n_ch) if n_ch else "-",
+            state,
         )
     console.print(table)
     console.print(
-        f"[dim]资源站目录 {len(catalog)} 个 ｜ TG 频道 {len(load_channels())} 个 ｜ "
-        f"索引 {total_msgs} 条消息[/dim]"
+        f"[dim]资源站 {len(catalog)} 个 ｜ API {sum(apis_by_v.values())} 个 ｜ "
+        f"TG 频道 {len(load_channels())} 个 ｜ 索引 {total_msgs} 条消息[/dim]"
     )
     console.print("[dim]注：TG 频道只有采收来的那部分带垂直标注，其余按影视/通用计。[/dim]")
 

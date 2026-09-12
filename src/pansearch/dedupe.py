@@ -47,13 +47,18 @@ def build_resources(hits: Iterable[RawHit]) -> list[Resource]:
                 origins=[hit.origin] if hit.origin else [],
                 hit_count=1,
                 from_primary=not hit.relaxed,
-                queries=[hit.query] if hit.query else [],
+                # 只记**非补搜**的命中词（主查询 / 别名）。
+                # 补搜词是刻意放宽的，让它参与相关性会自相矛盾：
+                # 实测「machine learning」的补搜词是 "machine"，于是
+                # 「侵略机器 War Machine」靠单独命中 "machine" 拿到 rel=0.95，
+                # 把真正的机器学习结果压到第 6 名。
+                queries=[hit.query] if (hit.query and not hit.relaxed) else [],
             )
             continue
 
         # 合并
         res.hit_count += 1
-        if hit.query and hit.query not in res.queries:
+        if hit.query and not hit.relaxed and hit.query not in res.queries:
             res.queries.append(hit.query)
         if not hit.relaxed:
             res.from_primary = True

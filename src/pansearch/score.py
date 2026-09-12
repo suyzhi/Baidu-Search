@@ -90,8 +90,13 @@ def _status_weight(res: Resource, cfg: dict) -> float:
 
 
 def _freshness(res: Resource, cfg: dict) -> float:
+    # 没有分享时间 -> **中性 1.0**，不该扣分。
+    # API 直链（arXiv/Crossref/MangaDex）天然没有 shared_at，原来给 0.8
+    # 等于无端打八折 —— 实测这让学术查询里本该排第一的 arXiv 论文
+    # 被"侵略机器 War Machine"这类只命中 "machine" 的网盘结果压下去。
+    # 缺数据不等于不新鲜。
     if not res.shared_at:
-        return 0.8
+        return 1.0
     halflife = float(cfg.get("freshness_halflife_days") or 730)
     when = res.shared_at
     if when.tzinfo is None:

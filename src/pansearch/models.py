@@ -25,6 +25,10 @@ class PanType(str, Enum):
     P115 = "115"
     PIKPAK = "pikpak"
     MAGNET = "magnet"
+    # 直链资源：文献（arXiv/Crossref/OpenAlex）、漫画（MangaDex）、公版书等。
+    # 学术与漫画这两个领域用 HTTP 爬页面基本爬不到（JS 渲染 / 反爬），
+    # 但它们有公开 API —— 把 API 结果当一等资源接进来。
+    DIRECT = "direct"
     OTHER = "other"
 
     @property
@@ -43,6 +47,7 @@ _PAN_LABELS = {
     PanType.P115: "115网盘",
     PanType.PIKPAK: "PikPak",
     PanType.MAGNET: "磁力链接",
+    PanType.DIRECT: "直链资源",
     PanType.OTHER: "其他",
 }
 

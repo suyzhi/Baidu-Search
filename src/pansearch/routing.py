@@ -56,9 +56,16 @@ VERTICAL_KEYWORDS: dict[str, tuple[str, ...]] = {
     ),
     "academic": (
         "论文", "文献", "sci", "sci-hub", "期刊", "arxiv", "知网", "万方",
-        "学位", "考研资料", "paper", "journal",
+        "学位", "考研资料", "paper", "journal", "research", "preprint",
+        "thesis", "dissertation", "citation", "doi", "study", "scholar",
+        "physics", "chemistry", "biology", "mathematics", "machine learning",
+        "neural", "quantum", "algorithm",
     ),
-    "comic": ("漫画", "条漫", "汉化组", "comic", "cbr", "cbz"),
+    "comic": (
+        "漫画", "条漫", "汉化组", "comic", "cbr", "cbz",
+        # 英文侧：API（MangaDex）主要靠这些词命中
+        "manga", "manhwa", "manhua", "webtoon", "doujin",
+    ),
 }
 
 # 通用站永远参与（不挑领域）

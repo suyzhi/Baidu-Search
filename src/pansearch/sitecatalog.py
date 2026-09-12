@@ -237,8 +237,18 @@ def derive_result_re(html: str, base: str) -> str:
     return f"https://{host}{best}"
 
 
+_HREF_RE = re.compile(r'href="([^"]{4,300})"')
+# 直接可下载的**文档/种子**后缀。
+# 学术与电子书领域的"资源"就是 PDF/EPUB 本身，不是网盘链接 ——
+# 只认网盘/磁力会把 libgen、Gutenberg、Standard Ebooks 这类全判成"无产出"。
+# 故意不收 .zip/.rar/.exe：太泛（任何软件站的下载按钮都是），会把误报放回来。
+_DOC_EXT_RE = re.compile(
+    r"\.(?:pdf|epub|mobi|azw3|djvu|fb2|cbz|cbr|torrent)(?:[?#\"'<>]|$)", re.I
+)
+
+
 def count_share_links(html: str) -> int:
-    """数一数页面里有几条**网盘 / 磁力**链接。
+    """数一数页面里有几条**可用的资源链接**：网盘 / 磁力 / 直接文档。
 
     这是探测器的第二道闸门，比"能搜出结果"重要得多：
     实测 ikanbot / rytv 是在线播放站、assrt 是字幕站 —— 搜索完全正常，
@@ -252,8 +262,14 @@ def count_share_links(html: str) -> int:
         url = raw.rstrip("。，、；;!！?？'\"")
         if detect_pan_type(url).value != "other":
             found.add(url)
+        elif _DOC_EXT_RE.search(url):
+            found.add(url)
     for m in MAGNET_RE.findall(html):
         found.add(m)
+    # 相对形式的文档链接（libgen / Gutenberg 等常给 /ebooks/xxx.epub 这种）
+    for href in _HREF_RE.findall(html):
+        if _DOC_EXT_RE.search(href):
+            found.add(href)
     return len(found)
 
 
@@ -373,18 +389,25 @@ async def probe_domain(
 
     import urllib.parse
 
+    # **先试站点自己搜索表单里的 URL** —— 那是准确的，比猜模板可靠得多。
+    # 猜不到的站（Gutenberg /ebooks/search/?query=、libgen /index.php?req=）
+    # 都能从表单里读出来。完整 URL 直接使用，后缀式模板才拼 base。
+    form_templates = detect_search_forms(home.text, base)
+    all_patterns: list[str] = form_templates + [base + p for p in patterns]
+
     best: ProbeResult | None = None
     saw_pattern = False          # 找到过可用搜索模板（只是可能没通过价值校验）
     best_yield = 0
     noise = _garbage()
-    for tpl in patterns:
+    for tpl in all_patterns:
         if time.monotonic() - started > budget:
             break                      # 超墙钟预算就收手，别为一个域名卡几分钟
         for term in probe_terms:
             if time.monotonic() - started > budget:
                 break
-            real_url = base + tpl.format(q=urllib.parse.quote(term))
-            noise_url = base + tpl.format(q=noise)
+            # tpl 已是完整 URL（表单推导的或 base+后缀拼好的）
+            real_url = tpl.format(q=urllib.parse.quote(term))
+            noise_url = tpl.format(q=noise)
             try:
                 real = await client.get(real_url, timeout=15)
                 if real.status_code != 200:
@@ -424,7 +447,7 @@ async def probe_domain(
                     continue
                 cand = ProbeResult(
                     domain=host, ok=True,
-                    search=base + tpl, template=tpl,
+                    search=tpl, template=tpl,
                     real_hits=r_hits, noise_hits=n_hits,
                     result_re=result_re, link_yield=yield_,
                 )
@@ -441,6 +464,59 @@ async def probe_domain(
         domain=host, ok=False,
         error="no-share-links" if saw_pattern else "no-pattern",
     )
+
+
+_FORM_RE = re.compile(r"<form\b[^>]*>(.*?)</form>", re.I | re.S)
+_FORM_ACTION_RE = re.compile(r'action\s*=\s*["\']([^"\']*)["\']', re.I)
+_FORM_METHOD_RE = re.compile(r'method\s*=\s*["\']?(\w+)', re.I)
+_INPUT_NAME_RE = re.compile(
+    r'<input\b[^>]*?(?:type\s*=\s*["\']?(?:text|search|q)["\']?[^>]*?)?'
+    r'name\s*=\s*["\']([^"\']+)["\']',
+    re.I,
+)
+
+
+def detect_search_forms(html: str, base: str) -> list[str]:
+    r"""从页面里的**搜索表单**直接读出搜索 URL 模板。
+
+    比猜模板通用得多：任何有站内搜索的网站都必然有一个 <form>，
+    而它的 action + input name 就是准确的搜索 URL。
+    实测 Gutenberg 是 /ebooks/search/?query=、libgen 是 /index.php?req=、
+    Standard Ebooks 是 /ebooks?query= —— 猜是猜不到的。
+
+    返回形如 "https://host/path?query={q}" 的候选（只取 GET 表单）。
+    """
+    from urllib.parse import urljoin
+
+    out: list[str] = []
+    for form_html, attrs in ((m.group(1), m.group(0)) for m in _FORM_RE.finditer(html)):
+        method = _FORM_METHOD_RE.search(attrs)
+        if method and method.group(1).lower() != "get":
+            continue                      # POST 表单没法用 URL 模板表达
+        action_m = _FORM_ACTION_RE.search(attrs)
+        action = action_m.group(1) if action_m else ""
+        # 表单里第一个文本类输入框的名字就是查询参数
+        name = None
+        for inp in re.finditer(r"<input\b[^>]*>", form_html, re.I):
+            tag = inp.group(0)
+            if re.search(r'type\s*=\s*["\']?(?:hidden|submit|button|checkbox|radio|file|image)',
+                         tag, re.I):
+                continue
+            nm = re.search(r'name\s*=\s*["\']([^"\']+)["\']', tag, re.I)
+            if nm:
+                name = nm.group(1)
+                break
+        if not name or name.lower() in ("s", "q", "query", "keyword", "wd", "search", "word", "req", "k"):
+            # 常见名字直接用；不常见的也接受，但要求 action 看起来像搜索
+            pass
+        if not name:
+            continue
+        url = urljoin(base.rstrip("/") + "/", action) if action else base.rstrip("/") + "/"
+        sep = "&" if "?" in url else "?"
+        template = f"{url}{sep}{name}={{q}}"
+        if template not in out:
+            out.append(template)
+    return out
 
 
 def _is_cjk_domain(host: str) -> bool:

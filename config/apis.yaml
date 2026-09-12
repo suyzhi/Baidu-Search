@@ -1,0 +1,57 @@
+# 公开 API 数据源
+#
+# 为什么要 API 而不是爬页面：
+#   学术与漫画这两个领域，用 HTTP 爬页面基本爬不到 —— 实测 arXiv 之外的
+#   Gutenberg / libgen / manhuagui / dm5 的搜索页只返回导航链接（JS 渲染），
+#   拿不到任何条目。但它们都有公开 API，结构化、稳定、不需要解析 HTML。
+#
+# 字段说明：
+#   url            搜索 URL 模板，{q} 会被替换成 URL 编码后的关键词
+#   format         json | xml
+#   items          JSON 点路径 / XML 标签名，指向结果列表
+#   title          条目内的标题点路径（可省略）
+#   link           条目内的链接点路径（与 link_template 二选一）
+#   link_template  用条目字段拼链接，如 "https://mangadex.org/title/{id}"
+#   vertical       所属垂直领域，决定查询时是否命中该 API
+#   weight         排序权重
+
+apis:
+  - name: arxiv
+    vertical: academic
+    enabled: true
+    weight: 0.8
+    url: "http://export.arxiv.org/api/query?search_query=all:{q}&max_results=20"
+    format: xml
+    items: entry
+    title: title
+    link: id
+
+  - name: crossref
+    vertical: academic
+    enabled: true
+    weight: 0.7
+    url: "https://api.crossref.org/works?query={q}&rows=20"
+    format: json
+    items: message.items
+    title: title          # crossref 的 title 是数组，取第一个
+    link: URL
+
+  - name: openalex
+    vertical: academic
+    enabled: true
+    weight: 0.7
+    url: "https://api.openalex.org/works?search={q}&per-page=20"
+    format: json
+    items: results
+    title: display_name
+    link: doi
+
+  - name: mangadex
+    vertical: comic,anime
+    enabled: true
+    weight: 0.7
+    url: "https://api.mangadex.org/manga?title={q}&limit=20"
+    format: json
+    items: data
+    title: attributes.title.en
+    link_template: "https://mangadex.org/title/{id}"

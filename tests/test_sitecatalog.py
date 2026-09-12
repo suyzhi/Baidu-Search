@@ -318,6 +318,73 @@ def test_maccms_pattern_is_available():
     assert any("vod/search" in p for p in SEARCH_PATTERNS)
 
 
+# ---------------------------------------------------------------- 搜索表单探测
+@pytest.mark.parametrize(
+    "html,base,expected",
+    [
+        # Gutenberg / libgen / Standard Ebooks 的搜索 URL 是猜不到的，只能从表单读
+        ('<form action="/ebooks/search/" method="get"><input type="text" name="query">'
+         '<input type="submit"></form>',
+         "https://www.gutenberg.org",
+         "https://www.gutenberg.org/ebooks/search/?query={q}"),
+        ('<form action="/index.php"><input type="hidden" name="x" value="1">'
+         '<input name="req"></form>',
+         "https://libgen.li",
+         "https://libgen.li/index.php?req={q}"),
+        ('<form action="/ebooks"><input type="search" name="query"></form>',
+         "https://standardebooks.org",
+         "https://standardebooks.org/ebooks?query={q}"),
+    ],
+)
+def test_detect_search_forms(html, base, expected):
+    from pansearch.sitecatalog import detect_search_forms
+
+    assert expected in detect_search_forms(html, base)
+
+
+def test_detect_search_forms_skips_post():
+    from pansearch.sitecatalog import detect_search_forms
+
+    assert detect_search_forms(
+        '<form action="/s" method="post"><input name="q"></form>', "https://x.com"
+    ) == []
+
+
+def test_detect_search_forms_handles_relative_action():
+    from pansearch.sitecatalog import detect_search_forms
+
+    got = detect_search_forms('<form action="search"><input name="kw"></form>', "https://a.b/c")
+    assert got == ["https://a.b/c/search?kw={q}"]
+
+
+def test_detect_search_forms_ignores_button_only_forms():
+    from pansearch.sitecatalog import detect_search_forms
+
+    assert detect_search_forms(
+        '<form action="/x"><input type="submit" name="go"></form>', "https://a.b"
+    ) == []
+
+
+# ---------------------------------------------------------------- 文档类资源
+def test_count_share_links_counts_direct_documents():
+    """学术/电子书领域的"资源"就是 PDF/EPUB 本身，不是网盘链接 ——
+    只认网盘会把 libgen、Gutenberg 这类全判成"无产出"。"""
+    from pansearch.sitecatalog import count_share_links
+
+    assert count_share_links('<a href="/ebooks/12345.epub">下载</a>') == 1
+    assert count_share_links('<a href="https://x.com/a.pdf">pdf</a>') == 1
+    assert count_share_links('<a href="/d.djvu">d</a><a href="/b.mobi">m</a>') == 2
+
+
+def test_count_share_links_excludes_generic_archives():
+    """故意不收 .zip/.rar/.exe：任何软件站的下载按钮都是，会把误报放回来。"""
+    from pansearch.sitecatalog import count_share_links
+
+    assert count_share_links('<a href="/soft/a.zip">下载</a>') == 0
+    assert count_share_links('<a href="/soft/a.rar">下载</a>') == 0
+    assert count_share_links('<a href="/soft/a.exe">下载</a>') == 0
+
+
 async def test_measure_yield_unescapes_base_for_relative_hrefs():
     """回归：base 是从正则里抠出来的，带着 re.escape 留下的反斜杠
     （https://share\\.dmhy\\.org）。直接拿去 urljoin 会拼出畸形 URL，
