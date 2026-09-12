@@ -22,6 +22,11 @@ class Adapter(ABC):
     name: str = ""
     kind: str = ""
 
+    # 只对"主查询/别名查询"运行，跳过放宽补搜查询。
+    # 慢源跑一遍要好几秒，而补搜词本身噪声很大（实测 "模板" 只回 8 条却要 6 秒），
+    # 让它们跟着补搜一起跑是纯浪费。
+    primary_only: bool = False
+
     def __init__(self, cfg: dict | None = None):
         self.cfg = cfg or {}
 

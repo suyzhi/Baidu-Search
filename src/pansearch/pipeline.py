@@ -194,7 +194,14 @@ async def search(
             plan += [(q, True) for q in relaxed_queries(kw)]
             plan += [(q, False) for q in alias_queries(kw)]
         batches = await asyncio.gather(
-            *(_fetch_hits(adapters, client, q) for q, _ in plan),
+            *(
+                _fetch_hits(
+                    [a for a in adapters if not (a.primary_only and is_relaxed)]
+                    or adapters,
+                    client, q,
+                )
+                for q, is_relaxed in plan
+            ),
             return_exceptions=True,
         )
 

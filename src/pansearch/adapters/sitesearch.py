@@ -90,6 +90,7 @@ _SKIP_PATH_PARTS = (
 class SiteSearchAdapter(Adapter):
     name = "sitesearch"
     kind = "forum"
+    primary_only = True      # 每个站要跟详情页，慢；补搜词不值得再跑一遍
 
     def __init__(self, cfg: dict | None = None):
         super().__init__(cfg)

@@ -261,3 +261,33 @@ async def test_alias_hits_scored_against_alias_word(monkeypatch):
     res = out.resources[0]
     assert res.queries == ["omnisphere"]
     assert score_resource(res, "大气合成器", scoring_cfg()) > 0.5
+
+
+# ---------------------------------------------------------------- 慢源只跑主查询
+class SlowStub(StubAdapter):
+    """模拟 sitesearch：慢，且只该对主查询/别名查询运行。"""
+    primary_only = True
+
+
+async def test_primary_only_source_skips_relaxed_queries(monkeypatch):
+    """回归：sitesearch 每个查询要 5~10 秒，跟着补搜词再跑一遍是纯浪费
+    （实测补搜词 "模板" 只回 8 条却要 6 秒）。"""
+    slow = SlowStub({}, _quark_hits(3))
+    fast = StubAdapter({}, _quark_hits(3))
+    monkeypatch.setattr(pipeline, "build_adapters", lambda names=None: [slow, fast])
+    monkeypatch.setattr(pipeline, "VerifierPool", StubPool)
+
+    await search("AE 模板", do_verify=True, alive_only=False, relax=True, verify_budget=0)
+
+    assert slow.calls == ["AE 模板"], "慢源只该跑主查询"
+    assert fast.calls == ["AE 模板", "AE", "模板"], "快源照常跑补搜"
+
+
+async def test_primary_only_source_still_runs_for_alias(monkeypatch):
+    """别名是等价替换（不是放宽），慢源也要跟着跑。"""
+    slow = SlowStub({}, _quark_hits(3, prefix="Omnisphere"))
+    monkeypatch.setattr(pipeline, "build_adapters", lambda names=None: [slow])
+    monkeypatch.setattr(pipeline, "VerifierPool", StubPool)
+
+    await search("大气合成器", do_verify=True, alive_only=False, relax=True, verify_budget=0)
+    assert slow.calls == ["大气合成器", "omnisphere"]
