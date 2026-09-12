@@ -291,3 +291,22 @@ async def test_primary_only_source_still_runs_for_alias(monkeypatch):
 
     await search("大气合成器", do_verify=True, alive_only=False, relax=True, verify_budget=0)
     assert slow.calls == ["大气合成器", "omnisphere"]
+
+
+# ---------------------------------------------------------------- 分阶段计时
+async def test_outcome_exposes_stage_timings(monkeypatch):
+    """只靠"总耗时"没法判断该优化哪一段 —— 实测多次以为瓶颈在验活，
+    实际在抓取（抓取 15~21s，验活只要 0.5~1.2s）。"""
+    monkeypatch.setattr(pipeline, "build_adapters", lambda names=None: [StubAdapter({}, _quark_hits(3))])
+    monkeypatch.setattr(pipeline, "VerifierPool", StubPool)
+
+    out = await search("测试", do_verify=True, alive_only=False, verify_budget=0)
+    assert "fetch" in out.timings
+    assert "verify" in out.timings
+    assert out.timings["fetch"] >= 0
+    assert out.slowest_stage in ("fetch", "verify")
+
+
+async def test_slowest_stage_empty_without_timings():
+    out = pipeline.SearchOutcome(keyword="x")
+    assert out.slowest_stage == ""

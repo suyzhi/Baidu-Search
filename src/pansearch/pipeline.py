@@ -82,10 +82,19 @@ class SearchOutcome:
     queries_used: list[str] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)
     verify_stats: dict = field(default_factory=dict)
+    # 分阶段耗时（秒）。只靠"总耗时"没法判断该优化哪一段 ——
+    # 实测多次以为瓶颈在验活，实际在抓取阶段。
+    timings: dict[str, float] = field(default_factory=dict)
 
     @property
     def alive_count(self) -> int:
         return sum(1 for r in self.resources if r.status.alive)
+
+    @property
+    def slowest_stage(self) -> str:
+        if not self.timings:
+            return ""
+        return max(self.timings.items(), key=lambda kv: kv[1])[0]
 
 
 def build_adapters(names: list[str] | None = None):
@@ -187,6 +196,9 @@ async def search(
         http2=True,
         headers={"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"},
     ) as client:
+        import time as _time
+
+        _t_start = _time.monotonic()
         # 主查询 / 补搜 / 别名替换 一起并行发出：
         #   补搜（relaxed=True）要降权 —— 它是放宽，召回多但精准度低
         #   别名（relaxed=False）不降权 —— 它是等价替换，命中结果按替换后的词打分
@@ -205,6 +217,7 @@ async def search(
             ),
             return_exceptions=True,
         )
+        outcome.timings["fetch"] = _time.monotonic() - _t_start
 
         hits: list[RawHit] = []
         for (query, is_relaxed), batch in zip(plan, batches):
@@ -253,6 +266,7 @@ async def search(
                 await pool.verify_all(resources)
                 outcome.verify_stats = dict(pool.stats)
             resources = resources + tail
+    outcome.timings["verify"] = _time.monotonic() - _t_start - outcome.timings.get("fetch", 0.0)
 
     score_all(resources, kw)
     resources = sort_resources(resources)

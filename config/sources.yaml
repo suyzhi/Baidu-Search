@@ -70,7 +70,10 @@ sources:
     enabled: true
     kind: forum
     weight: 0.75
-    deadline: 20
+    # 实测这一源单次要 13~29 秒，却只回 0~17 条（Serum 合成器 28 秒回 1 条），
+    # 而同期的 telegram 0.4 秒回 131 条。它长期是整条链路的关键路径。
+    # 砍到 12 秒：慢站拿不到就算了，不再让它一个人决定整次搜索要等多久。
+    deadline: 12
     concurrency: 4          # 同时打几个站
     max_pages: 4            # 每个站最多跟进几个详情页（再多收益很小）
     page_timeout: 12
@@ -110,7 +113,9 @@ sources:
     kind: websearch
     weight: 0.6
     timeout: 25
-    deadline: 12          # 实测产出很低（每次 3~6 条），不值得拖慢整体
+    # 实测每次 8~9 秒只回 0~1 条（换了 bing/ddg 之后仍是这个量级），
+    # 产出与耗时完全不成比例，砍到 6 秒。
+    deadline: 6
     concurrency: 3
     rate_limit_qps: 1.5         # 实测 0.4 太保守：6 个请求光限速就要 15s
     fetch_result_pages: true    # 阶段 2：抓内容页（召回主力，比阶段 1 值钱）
