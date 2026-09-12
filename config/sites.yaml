@@ -1,14 +1,22 @@
 # 资源站目录（由 pansearch sites probe 生成/更新）
 # verticals 决定查询时是否命中该站；search 里的 {q} 会被替换成 URL 编码后的关键词。
 sites:
+- name: mikanani
+  domain: mikanani.me
+  verticals:
+  - anime
+  search: https://mikanani.me/Home/Search?searchstr={q}
+  result_re: https://mikanani\.me/[a-z0-9_-]+/[a-z0-9_-]+/\d+[a-z0-9_-]+
+  verified: true
+  note: probe https://mikanani.me/Home/Search?searchstr={q} yield=310
 - name: dmhy
   domain: share.dmhy.org
   verticals:
   - anime
-  search: https://share.dmhy.org/?keyword={q}
+  search: https://share.dmhy.org/topics/list?keyword={q}
   result_re: https://share\.dmhy\.org/[a-z0-9_-]+/[a-z0-9_-]+/\d+_[a-z0-9_-]+\.html
   verified: true
-  note: probe /?keyword={q} yield=14
+  note: probe https://share.dmhy.org/topics/list?keyword={q} yield=19
 - name: looptorrent
   domain: looptorrent.net
   verticals:
@@ -17,7 +25,7 @@ sites:
   search: https://looptorrent.net/?s={q}
   result_re: https://looptorrent\.net/[a-z0-9_-]+/
   verified: true
-  note: probe /?s={q} yield=9
+  note: probe https://looptorrent.net/?s={q} yield=9
 - name: plugintorrent
   domain: plugintorrent.com
   verticals:
@@ -25,7 +33,7 @@ sites:
   search: https://plugintorrent.com/?s={q}
   result_re: https://plugintorrent\.com/[a-z0-9_-]+/
   verified: true
-  note: probe /?s={q} yield=30
+  note: probe https://plugintorrent.com/?s={q} yield=30
 - name: vstorrent
   domain: vstorrent.org
   verticals:
@@ -34,7 +42,15 @@ sites:
   search: https://vstorrent.org/?s={q}
   result_re: https://vstorrent\.org/[a-z0-9_-]+/
   verified: true
-  note: probe /?s={q} yield=30
+  note: probe https://vstorrent.org/?s={q} yield=30
+- name: bookfere
+  domain: bookfere.com
+  verticals:
+  - ebook
+  search: https://bookfere.com/?s={q}
+  result_re: https://bookfere\.com/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://bookfere.com/?s={q} yield=9
 - name: gamer520
   domain: www.gamer520.com
   verticals:
@@ -42,7 +58,7 @@ sites:
   search: https://www.gamer520.com/?s={q}
   result_re: https://www\.gamer520\.com/\d+\.html
   verified: true
-  note: probe /?s={q} yield=62
+  note: probe https://www.gamer520.com/?s={q} yield=62
 - name: 423down
   domain: www.423down.com
   verticals:
@@ -50,15 +66,15 @@ sites:
   search: https://www.423down.com/?s={q}
   result_re: https://www\.423down\.com/[a-z0-9_-]+\.html
   verified: true
-  note: probe /?s={q} yield=5
+  note: probe https://www.423down.com/?s={q} yield=9
 - name: dayanzai
   domain: www.dayanzai.me
   verticals:
   - software
-  search: https://www.dayanzai.me/?s={q}
+  search: https://www.dayanzai.me?s={q}
   result_re: https://www\.dayanzai\.me/[a-z0-9_-]+\.html
   verified: true
-  note: probe /?s={q} yield=4
+  note: probe https://www.dayanzai.me?s={q} yield=4
 - name: ghxi
   domain: www.ghxi.com
   verticals:
@@ -66,7 +82,7 @@ sites:
   search: https://www.ghxi.com/?s={q}
   result_re: https://www\.ghxi\.com/[a-z0-9_-]+\.html
   verified: true
-  note: probe /?s={q} yield=8
+  note: probe https://www.ghxi.com/?s={q} yield=8
 - name: iplaysoft
   domain: www.iplaysoft.com
   verticals:
@@ -74,7 +90,7 @@ sites:
   search: https://www.iplaysoft.com/?s={q}
   result_re: https://www\.iplaysoft\.com/[a-z0-9_-]+/\d+
   verified: true
-  note: probe /?s={q} yield=1
+  note: probe https://www.iplaysoft.com/?s={q} yield=1
 - name: puresys
   domain: www.puresys.net
   verticals:
@@ -82,7 +98,7 @@ sites:
   search: https://www.puresys.net/?s={q}
   result_re: https://www\.puresys\.net/\d+\.html
   verified: true
-  note: probe /?s={q} yield=2
+  note: probe https://www.puresys.net/?s={q} yield=2
 - name: ypojie
   domain: www.ypojie.com
   verticals:
@@ -90,4 +106,4 @@ sites:
   search: https://www.ypojie.com/so/{q}
   result_re: https://www\.ypojie\.com/\d+\.html
   verified: true
-  note: probe /so/{q} yield=6
+  note: probe https://www.ypojie.com/so/{q} yield=6

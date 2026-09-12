@@ -428,16 +428,106 @@ def sites_probe(
                 name=r.domain.split(".")[-2] if r.domain.count(".") >= 1 else r.domain,
                 domain=r.domain,
                 search=r.search,
-                # 详情页正则留空，由用户在目录里按站点结构补；留空则该站不参与搜索
-                result_re=existing.get(r.domain).result_re if existing.get(r.domain) else "",
+                # 用探测器**推导出来**的详情页正则；留空该站就不参与搜索。
+                # 之前这里是复用旧条目的值，但旧条目可能已被批量重探删掉，
+                # 结果写出一个 result_re 为空、实际不可用的条目。
+                result_re=r.result_re or (
+                    existing.get(r.domain).result_re if existing.get(r.domain) else ""
+                ),
                 verticals=[vertical],
                 verified=True,
-                note=f"probe: {r.template}",
+                note=f"probe {r.template} yield={r.link_yield}",
             )
         path = save_catalog(list(existing.values()))
         console.print(f"[green]已写入 {path}[/green]（{len(good)} 个可用）")
     elif save:
         console.print("[yellow]没有探到可用模板，目录未改动。[/yellow]")
+
+
+@sites_app.command("probe-all")
+def sites_probe_all(
+    cand_file: str = typer.Option("config/sites_candidates.txt", "--file", "-f",
+                                  help="候选清单（每行：域名 [垂直领域,领域]）"),
+    concurrency: int = typer.Option(8, "--concurrency", "-c"),
+    budget: float = typer.Option(75.0, "--budget", help="每个域名的探测墙钟预算（秒）"),
+) -> None:
+    """批量探测候选域名并**合并**进目录。
+
+    关键：合并语义，不是替换。探测会因为网络抖动偶发失败，
+    如果用"这轮没探到就删掉"的语义，可用站点会被误删 ——
+    实测 www.ypojie.com 上一轮 y=6 通过，下一轮被判 no-pattern，
+    隔几秒重试又是 y=6。真正的失效交给运行时的健康度去淘汰。
+    """
+    import asyncio as _asyncio
+    from pathlib import Path as _Path
+
+    import httpx as _httpx
+
+    from .sitecatalog import (
+        UA, SiteEntry, load_catalog, probe_domain, save_catalog,
+    )
+
+    path = _Path(cand_file)
+    if not path.exists():
+        console.print(f"[red]候选清单不存在：{path}[/red]")
+        raise typer.Exit(1)
+
+    cands: list[tuple[str, list[str]]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        verticals = [v for v in parts[1].split(",") if v] if len(parts) > 1 else ["general"]
+        cands.append((parts[0], verticals or ["general"]))
+
+    existing = {e.host: e for e in load_catalog()}
+    known = len(existing)
+    console.print(f"[cyan]探测 {len(cands)} 个候选（并发 {concurrency}，每域名预算 {budget:.0f}s）…[/cyan]")
+
+    async def _run() -> None:
+        sem = _asyncio.Semaphore(concurrency)
+        lock = _asyncio.Lock()
+        ok = 0
+        done = 0
+
+        async with _httpx.AsyncClient(
+            follow_redirects=True, http2=True, timeout=20,
+            headers={"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.6"},
+        ) as client:
+            async def one(domain: str, verticals: list[str]) -> None:
+                nonlocal ok, done
+                async with sem:
+                    result = await probe_domain(client, domain, budget=budget)
+                async with lock:
+                    done += 1
+                    if result.ok and result.result_re and result.link_yield > 0:
+                        ok += 1
+                        existing[result.domain] = SiteEntry(
+                            name=result.domain.split(".")[-2],
+                            domain=result.domain,
+                            search=result.search,
+                            result_re=result.result_re,
+                            verticals=verticals,
+                            verified=True,
+                            note=f"probe {result.template} yield={result.link_yield}",
+                        )
+                        console.print(f"[{done:>3}/{len(cands)}] [green]OK[/green] "
+                                      f"{result.domain:<28} y={result.link_yield:<4} "
+                                      f"{result.template:<40} {result.result_re[:44]}")
+                    else:
+                        console.print(f"[{done:>3}/{len(cands)}] [dim]--  {domain:<28} "
+                                      f"{result.error or 'yield=0'}[/dim]")
+
+            await _asyncio.gather(*(one(d, v) for d, v in cands))
+
+        saved = save_catalog(list(existing.values()))
+        kept = [e for e in existing.values() if e.verified]
+        console.print(f"\n本轮通过 [bold green]{ok}[/bold green]/{len(cands)}"
+                      f"；目录 [bold]{len(kept)}[/bold] 个站（原有 {known} 个保留）")
+        console.print(f"[green]已写入 {saved}[/green]")
+
+    _asyncio.run(_run())
 
 
 @sites_app.command("health")
