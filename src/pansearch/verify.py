@@ -163,21 +163,37 @@ class BaiduVerifier:
                     status = self._status_from(str(self.sv_map.get(errno, self.default)))
                     note = None
                     if status is Status.WRONG_PWD:
-                        # 码不对 ≠ 链接失效：用 shorturlinfo 查链接本身是否还在
+                        # 码不对 ≠ 链接失效：用 shorturlinfo 查链接本身是否还在。
+                        # 状态保持 wrong_pwd（"码错"是我们已知的信息，不该丢掉）
                         alt_errno, _ = await self._shorturlinfo(res.surl)
                         alt = self._status_from(str(self.su_map.get(alt_errno, self.default)))
                         if alt in (Status.ALIVE, Status.NEED_PWD):
-                            note = f"链接存活，但提取码不正确（shorturlinfo errno={alt_errno}）"
+                            note = "链接存活，但提取码不正确"
                         else:
                             status = alt
-                            note = f"提取码错误且链接不可用（shorturlinfo errno={alt_errno}）"
+                            note = "提取码错误且链接不可用"
+                    elif status is Status.UNKNOWN:
+                        # 接口返回了没见过的码 —— 实测 2026-09 起 share/verify 对**所有**
+                        # 链接（含已验证存活的）恒返回 -62。这时回退到 shorturlinfo，
+                        # 至少判定"链接还在不在"，而不是把百度结果一律标成"未知"。
+                        alt_errno, _ = await self._shorturlinfo(res.surl)
+                        alt = self._status_from(str(self.su_map.get(alt_errno, self.default)))
+                        if alt in (Status.ALIVE, Status.NEED_PWD):
+                            status = alt
+                            note = f"链接存活，但提取码未经验证（share/verify 返回 {errno}）"
+                        else:
+                            status = alt
+                            note = (
+                                f"链接不可用（share/verify {errno}，"
+                                f"shorturlinfo {alt_errno}）"
+                            )
                     result = VerifyResult(
                         status=status,
                         errno=errno,
                         method="share_verify",
                         note=note,
                         # share/verify 返回 0 说明提取码确实被服务端校验通过
-                        pwd_verified=status is Status.ALIVE,
+                        pwd_verified=status is Status.ALIVE and errno == 0,
                     )
             else:
                 # shorturlinfo 必须用「完整 token（带开头 1）」，否则恒返回 2（假阳性）

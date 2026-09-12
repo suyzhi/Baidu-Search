@@ -111,12 +111,16 @@ def score_resource(res: Resource, kw: str, cfg: dict | None = None) -> float:
     if res.hit_count > 1:
         score *= 1.0 + min(0.35, (res.hit_count - 1) * bonus)
 
-    # 百度优先
-    if res.pan_type is PanType.BAIDU:
+    # 百度优先 —— **只给能确认可用的链接**。
+    # 若不加这个条件：百度 share/verify 被锁（恒返回 -62）时，一堆"确定不了"的
+    # 百度链接光靠域名就能压过已验证可用的夸克链接，实测表现为
+    # 「漂流少年」前排全是不对版的百度结果、真资源在夸克却排在后面。
+    if res.pan_type is PanType.BAIDU and res.usable:
         score *= 1.0 + float(cfg.get("pan_priority_bonus") or 0.0)
 
-    # 有提取码 = 可直接用
-    if res.pwd and res.status in (Status.ALIVE, Status.NEED_PWD):
+    # 有提取码 = 可直接用 —— 但只在**链接确实可确认可用**时才算优势。
+    # 否则一堆"提取码还没验证过"的百度链接会靠这个加成压过确认可用的夸克链接。
+    if res.pwd and res.usable:
         score *= 1.1
 
     # 只被"放宽查询"命中的结果降权（保留可发现性，但不淹没主查询结果）
@@ -134,23 +138,37 @@ def score_all(resources: list[Resource], kw: str) -> list[Resource]:
 
 
 def sort_resources(resources: list[Resource], *, alive_first: bool = True) -> list[Resource]:
-    """排序：失效沉底 → 未验活的沉到已验活之后 → 分数 → 网盘优先级（仅作平手时的兜底）。
+    """排序：失效沉底 → 确定性分层 → 分数 → 可确认可用 → 网盘优先级。
 
-    注意：网盘优先级**不能**作为独立层级排在分数前面，否则"不相关的百度结果"
-    会压过"高度相关的夸克结果"。百度优先已由 scoring.pan_priority_bonus 体现。
+    分层顺序（越靠前越可信）：
+      0  确认存活（alive）
+      1  存活但没能确认可用（需提取码 / 码不对）
+      2  确定不了 / 该网盘不支持验活（unknown / unchecked / unsupported）
+
+    为什么要单独分层：百度 share/verify 被锁后，大量百度链接只能判到"需提取码"。
+    如果和"确认存活"的夸克链接混在同一层比分数，它们会靠"百度优先"占前排 ——
+    实测「漂流少年」就是这个现象（前排全是不对版的百度结果，真资源在夸克）。
     """
     prio = {p: i for i, p in enumerate(pan_priority())}
-    verified_ok = {Status.ALIVE, Status.NEED_PWD, Status.WRONG_PWD}
     confirmed_dead = {Status.DEAD, Status.NOT_FOUND}
+    alive_set = {Status.ALIVE}
+    partial = {Status.NEED_PWD, Status.WRONG_PWD}
 
     def sort_key(res: Resource):
         st = res.status
         dead = 1 if st in confirmed_dead else 0
         if not alive_first:
             dead = 0
-        # 验活过且可用（含码不对）= 0；未验活/无法判定/不支持 = 1
-        unverified = 0 if st in verified_ok else 1
+        if st in alive_set:
+            tier = 0
+        elif st in partial:
+            tier = 1
+        else:
+            tier = 2
+        # 只在分数相同时才用"可确认可用"和网盘优先级决胜，
+        # 避免它们盖过相关性差异
+        not_usable = 0 if res.usable else 1
         pan_rank = prio.get(res.pan_type.value, len(prio))
-        return (dead, unverified, -res.score, pan_rank)
+        return (dead, tier, -res.score, not_usable, pan_rank)
 
     return sorted(resources, key=sort_key)

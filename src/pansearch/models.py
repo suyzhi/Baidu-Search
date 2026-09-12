@@ -137,6 +137,18 @@ class Resource(BaseModel):
         return bool(self.verify and self.verify.pwd_verified)
 
     @property
+    def usable(self) -> bool:
+        """我们敢为这条链接背书：确认存活，且（无提取码，或提取码已被接口校验通过）。
+
+        百度 share/verify 失效后，带提取码的百度链接拿不到这个状态 ——
+        于是它们不再享受"百度优先"，也就不会仅因域名是百度就压过
+        已验证可用的夸克/阿里链接。
+        """
+        if self.status is not Status.ALIVE:
+            return False
+        return (not self.pwd) or self.pwd_verified
+
+    @property
     def status_label(self) -> str:
         """展示用状态：只有接口真正校验过提取码，才敢说"码已验证"。"""
         if self.status is Status.ALIVE:

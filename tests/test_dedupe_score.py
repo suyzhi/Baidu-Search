@@ -90,6 +90,52 @@ def test_baidu_ranks_before_other_pans():
     assert scored[0].pan_type is PanType.BAIDU
 
 
+def test_baidu_priority_only_for_usable_links():
+    """回归：百度 share/verify 被锁（恒返回 -62）时，一堆"确定不了"的百度链接
+    光靠域名就能压过已验证可用的夸克链接 —— 实测「漂流少年」前排全是不对版的
+    百度结果、真资源在夸克却排在后面。
+    """
+    from pansearch.models import VerifyResult
+
+    # 百度：存活但提取码没验证过（回退路径的典型结果）
+    baidu_unverified = _make("1AAA", Status.ALIVE, pwd="abcd")
+    baidu_unverified.verify = VerifyResult(status=Status.ALIVE, pwd_verified=False)
+
+    # 夸克：确认存活
+    quark_ok = build_resources(
+        [hit("https://pan.quark.cn/s/xyz", pwd=None, title="三体 全集")]
+    )[0]
+    quark_ok.verify = VerifyResult(status=Status.ALIVE)
+
+    scored = sort_resources(score_all([baidu_unverified, quark_ok], "三体"))
+    assert scored[0] is quark_ok, "没能确认可用的百度链接不该拿'百度优先'"
+
+    # 反例：百度码验证通过时，仍然享优先
+    baidu_ok = _make("1BBB", Status.ALIVE, pwd="abcd")
+    baidu_ok.verify = VerifyResult(status=Status.ALIVE, pwd_verified=True)
+    scored2 = sort_resources(score_all([baidu_ok, quark_ok], "三体"))
+    assert scored2[0] is baidu_ok
+
+
+def test_usable_property():
+    from pansearch.models import VerifyResult
+
+    no_pwd = _make("1AAA", Status.ALIVE, pwd=None)
+    no_pwd.verify = VerifyResult(status=Status.ALIVE)
+    assert no_pwd.usable is True                 # 公开分享，无需提取码
+
+    unverified = _make("1BBB", Status.ALIVE, pwd="abcd")
+    unverified.verify = VerifyResult(status=Status.ALIVE, pwd_verified=False)
+    assert unverified.usable is False
+
+    verified = _make("1CCC", Status.ALIVE, pwd="abcd")
+    verified.verify = VerifyResult(status=Status.ALIVE, pwd_verified=True)
+    assert verified.usable is True
+
+    dead = _make("1DDD", Status.DEAD)
+    assert dead.usable is False
+
+
 def test_dead_links_get_near_zero_status_weight():
     alive = _make("1AAA", Status.ALIVE)
     dead = _make("1BBB", Status.DEAD)

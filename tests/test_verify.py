@@ -110,6 +110,43 @@ async def test_unknown_errno_is_not_claimed_dead(tmp_path):
     assert out.status is Status.UNKNOWN
 
 
+async def test_unmapped_code_falls_back_to_liveness(tmp_path):
+    """回归：2026-09 起百度 share/verify 对所有链接恒返回 -62（含已验证存活的）。
+
+    不能因此把百度结果全标成"未知" —— 应回退到 shorturlinfo 判定链接还在不在。
+    """
+    seen: dict = {}
+    verifier = make_verifier(tmp_path, record(seen, share_errno=-62, short_errno=-9))
+    out = await verifier.verify(make_resource("abcd"))
+    assert out.status is Status.NEED_PWD
+    assert out.errno == -62
+    assert "未经验证" in (out.note or "")
+    assert out.pwd_verified is False
+    assert seen["short_surl"] == SURL      # 确实回退查了 shorturlinfo
+
+
+async def test_unmapped_code_with_dead_link_still_marks_dead(tmp_path):
+    seen: dict = {}
+    verifier = make_verifier(tmp_path, record(seen, share_errno=-62, short_errno=140))
+    out = await verifier.verify(make_resource("abcd"))
+    assert out.status is Status.NOT_FOUND
+
+
+async def test_verified_alive_still_requires_errno_zero(tmp_path):
+    """-62 走回退路径后不能变成"码已验证"。"""
+    seen: dict = {}
+    verifier = make_verifier(tmp_path, record(seen, share_errno=-62, short_errno=-9))
+    out = await verifier.verify(make_resource("abcd"))
+    assert out.pwd_verified is False
+
+    # 用独立的缓存目录，避免命中上一条的缓存
+    seen2: dict = {}
+    verifier2 = make_verifier(tmp_path / "second", record(seen2, share_errno=0))
+    ok = await verifier2.verify(make_resource("abcd"))
+    assert ok.status is Status.ALIVE
+    assert ok.pwd_verified is True
+
+
 async def test_cache_hit_writes_back_to_resource(tmp_path):
     """回归：缓存命中必须写回 res.verify，否则会被显示成"未校验"。"""
     seen: dict = {}

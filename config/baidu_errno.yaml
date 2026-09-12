@@ -31,6 +31,10 @@ share_verify:
   "-9": wrong_pwd         # 提取码错误（链接本身可能仍然存活）
   "-12": wrong_pwd        # 视为码错，交由 shorturlinfo 兜底判定链接是否还在
   "105": not_found        # 分享不存在 / 已失效
+  # ⚠️ 2026-09 起实测：share/verify 对**所有**链接（含已验证存活的）恒返回 -62，
+  #    百度改了这个接口的行为。它不代表失效，也不能当成功，所以判为 unknown，
+  #    由 Verifier 自动回退到 shorturlinfo 去判定"链接还在不在"。
+  "-62": unknown
 
 # 未知 errno 的默认判定（保守：不宣称失效，也不宣称有效）
 default: unknown
