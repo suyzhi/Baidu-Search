@@ -56,6 +56,20 @@ def test_skips_unparseable_baidu_link():
     assert _hits("https://pan.baidu.com/share/link?shareid=123&uk=456") == []
 
 
+def test_url_stops_at_cjk_text():
+    """回归：URL 后面的中文不能被吃进链接。
+
+    实测抓到过 https://drive.uc.cn/s/0b0352b237034我用夸克 这种坏链接。
+    """
+    hits = _hits("链接：https://drive.uc.cn/s/0b0352b237034我用夸克网盘分享了")
+    assert hits[0].url == "https://drive.uc.cn/s/0b0352b237034"
+
+
+def test_url_with_cjk_punctuation_suffix():
+    hits = _hits("下载：https://pan.quark.cn/s/251cd20497e6。")
+    assert hits[0].url == "https://pan.quark.cn/s/251cd20497e6"
+
+
 def test_pwd_hint_fallback():
     hits = extract_from_text(
         "https://pan.baidu.com/s/1DDDDDDDDDDD", source="s", kind="pansou", pwd_hint="kkkk"

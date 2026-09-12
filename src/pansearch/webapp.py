@@ -32,6 +32,7 @@ async def api_search(
     types: Optional[str] = Query(None, description="网盘类型，逗号分隔"),
     limit: int = Query(50, ge=1, le=500),
     alive_only: bool = Query(True),
+    strict: bool = Query(False, description="严格模式：连无法验活的网盘一并剔除"),
     verify: bool = Query(True),
 ) -> JSONResponse:
     type_list: list[PanType] | None = None
@@ -52,6 +53,7 @@ async def api_search(
         types=type_list,
         do_verify=verify,
         alive_only=alive_only,
+        strict=strict,
         limit=None,
     )
     results = outcome.resources[:limit]
@@ -61,9 +63,12 @@ async def api_search(
             "keyword": outcome.keyword,
             "raw_hits": outcome.raw_hits,
             "dedup_count": outcome.dedup_count,
+            "pruned": outcome.pruned,
+            "strict": outcome.strict,
             "shown": len(results),
             "alive_count": outcome.alive_count,
             "used_sources": outcome.used_sources,
+            "queries_used": outcome.queries_used,
             "errors": outcome.errors,
             "verify_stats": outcome.verify_stats,
             "results": [
@@ -75,8 +80,9 @@ async def api_search(
                     "copy_text": res.copy_text(),
                     "pwd": res.pwd,
                     "status": res.status.value,
-                    "status_label": res.status.label,
+                    "status_label": res.status_label,
                     "alive": res.status.alive,
+                    "pwd_verified": res.pwd_verified,
                     "errno": res.verify.errno if res.verify else None,
                     "note": res.verify.note if res.verify else None,
                     "method": res.verify.method if res.verify else None,

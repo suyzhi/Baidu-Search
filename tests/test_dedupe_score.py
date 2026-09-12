@@ -104,6 +104,83 @@ def test_keyword_relevance_affects_score():
     assert on_topic.score > off_topic.score
 
 
+def test_multiterm_query_scores_partial_matches():
+    """回归：「沙丘 4K HDR」这种多词查询，标题里三个词都出现的必须排最前。
+
+    旧实现把整串拿去匹配（含空格），结果这类标题反而被判成不相关。
+    """
+    from pansearch.score import _relevance
+
+    full = _make("1AAA", Status.ALIVE, title="沙丘：预言 (2024) 4K DV＆HDR 内封简中")
+    partial = _make("1BBB", Status.ALIVE, title="沙丘 全集 1080P")
+    none = _make("1CCC", Status.ALIVE, title="完全无关")
+    kw = "沙丘 4K HDR"
+    assert _relevance(full, kw) > _relevance(partial, kw) > _relevance(none, kw)
+    assert _relevance(full, kw) >= 0.95
+
+
+def test_multiterm_query_ranks_full_match_first():
+    from pansearch.score import _relevance
+
+    assert _relevance(_make("1AAA", Status.ALIVE, title="沙丘 4K HDR 原盘"), "沙丘 4K HDR") == 1.0
+
+
+def test_sort_puts_verified_above_unverified():
+    """勾了"剔除失效"后，已验证可用的链接必须浮到未验活的上面。"""
+    from pansearch.models import VerifyResult
+
+    verified = _make("1AAA", Status.ALIVE)
+    unverified = build_resources(
+        [hit("https://pan.xunlei.com/s/VNshhdg5bL3QO86-DzVEgWRmA1", kind="pansou")]
+    )[0]
+    unverified.verify = VerifyResult(status=Status.UNSUPPORTED)
+    # 迅雷在网盘优先级里比百度高也没用，未验活必须靠后
+    scored = sort_resources(score_all([unverified, verified], "三体"))
+    assert scored[0] is verified
+    assert scored[-1] is unverified
+
+
+def test_relevance_dominates_pan_priority():
+    """回归：不相关的百度结果**不能**压过高度相关的夸克结果。
+
+    旧实现把网盘优先级当独立排序层级排在做分数前面，导致
+    「沙丘 4K HDR」的头几条是「地狱占星师 4K HDR」这种不相关结果。
+    """
+    irrelevant_baidu = _make("1AAA", Status.ALIVE, title="地狱占星师 (2026) 4K HDR 全9集")
+    relevant_quark = build_resources(
+        [hit("https://pan.quark.cn/s/aaaaaaaaaaaa", title="沙丘2 4K HDR 杜比视界")]
+    )[0]
+    from pansearch.models import VerifyResult
+
+    relevant_quark.verify = VerifyResult(status=Status.ALIVE)
+
+    scored = sort_resources(score_all([irrelevant_baidu, relevant_quark], "沙丘 4K HDR"))
+    assert scored[0] is relevant_quark, "高度相关的结果必须排在前面，即使它不是百度网盘"
+
+
+def test_relaxed_only_hits_are_downweighted():
+    primary = _make("1AAA", Status.ALIVE)
+    primary.from_primary = True
+    relaxed = _make("1BBB", Status.ALIVE)
+    relaxed.from_primary = False
+    score_all([primary, relaxed], "三体")
+    assert relaxed.score < primary.score
+
+
+def test_resource_merging_prefers_primary_hit():
+    resources = build_resources(
+        [
+            hit("https://pan.baidu.com/s/1AAA", relaxed=True),
+            hit("https://pan.baidu.com/s/1AAA", relaxed=False),
+        ]
+    )
+    assert len(resources) == 1
+    assert resources[0].from_primary is True
+
+    only_relaxed = build_resources([hit("https://pan.baidu.com/s/1BBB", relaxed=True)])[0]
+    assert only_relaxed.from_primary is False
+
+
 def test_multi_source_bonus():
     one = _make("1AAA", Status.ALIVE)
     many = build_resources(

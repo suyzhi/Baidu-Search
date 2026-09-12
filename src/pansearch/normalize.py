@@ -47,8 +47,12 @@ BARE_PWD_RE = re.compile(r"[（(【\[]\s*([A-Za-z0-9]{4})\s*[）)】\]]")
 # url 里的 query / fragment 形态
 URL_PWD_RE = re.compile(r"[?&#](?:pwd|password|passwd|pwd=)=?([A-Za-z0-9]{4})\b", re.I)
 # 分享链接本体（含 URL 编码形态）
-# 字符类排除全部全角标点，否则 "链接（密码 xxxx）" 会把 "（密码" 吃进 URL
-URL_RE = re.compile(r"https?://[^\s\"'<>()（）【】「」『』《》，,、。；;：:！!？?\]\[{}|\\^`]+")
+# 字符类排除：全角标点、各类括号引号，以及**所有中日韩字符**
+#   —— 否则 "https://drive.uc.cn/s/xxx我用夸克" 会把中文吃进 URL，产出坏链接
+URL_RE = re.compile(
+    r"https?://[^\s\"'<>()（）【】「」『』《》，,、。；;：:！!？?\]\[{}|\\^`"
+    r"\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef]+"
+)
 BAIDU_SURL_RE = re.compile(r"pan\.baidu\.com/s/([A-Za-z0-9_-]+)", re.I)
 BAIDU_SURL_ENCODED_RE = re.compile(r"pan\.baidu\.com(?:%2F|/)s(?:%2F|/)([A-Za-z0-9_-]+)", re.I)
 

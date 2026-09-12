@@ -57,7 +57,7 @@ class Status(str, Enum):
     NOT_FOUND = "not_found"    # ❌ 链接不存在
     UNKNOWN = "unknown"        # ⚠️ 无法判定
     UNCHECKED = "unchecked"    # 尚未校验
-    UNSUPPORTED = "unsupported"  # 非百度，本工具不校验
+    UNSUPPORTED = "unsupported"  # 该网盘暂不支持验活（≠ 有效）
 
     @property
     def alive(self) -> bool:
@@ -69,14 +69,14 @@ class Status(str, Enum):
 
 
 _STATUS_LABELS = {
-    Status.ALIVE: "有效(码已验证)",
+    Status.ALIVE: "有效",
     Status.NEED_PWD: "有效(需提取码)",
     Status.WRONG_PWD: "存活/码不对",
     Status.DEAD: "已失效",
     Status.NOT_FOUND: "不存在",
     Status.UNKNOWN: "未知",
     Status.UNCHECKED: "未校验",
-    Status.UNSUPPORTED: "未校验(非百度)",
+    Status.UNSUPPORTED: "未校验(该网盘不支持)",
 }
 
 
@@ -91,14 +91,21 @@ class RawHit(BaseModel):
     size: str | None = None
     shared_at: datetime | None = None
     origin: str | None = None       # 来源页面（可点回原帖）
+    relaxed: bool = False           # 是否来自"放宽查询"补搜（用于降权，避免淹没主查询结果）
 
 
 class VerifyResult(BaseModel):
     status: Status
     errno: int | None = None
-    method: str | None = None       # share_verify | shorturlinfo | cache
+    method: str | None = None       # baidu | quark | aliyun | 115 | tianyi（cache: 前缀表示来自缓存）
     checked_at: datetime = Field(default_factory=now_utc)
     note: str | None = None
+    # 验活接口顺带返回的**真实资源名**（阿里/115/天翼 都会给），用于补全标题
+    title_hint: str | None = None
+    # 提取码是否被接口**真正校验**过。
+    # 百度 share/verify 与 115 receive_code 会校验；夸克/阿里/天翼的接口不校验提取码，
+    # 所以不能用"码已验证"来宣称它们可用。
+    pwd_verified: bool = False
 
 
 class Resource(BaseModel):
@@ -116,12 +123,27 @@ class Resource(BaseModel):
     kinds: list[str] = Field(default_factory=list)
     origins: list[str] = Field(default_factory=list)
     hit_count: int = 1
+    # 是否由"主查询"命中（False = 只被放宽查询命中）；用于降权，避免补搜结果淹没主结果
+    from_primary: bool = True
     verify: VerifyResult | None = None
     score: float = 0.0
 
     @property
     def status(self) -> Status:
         return self.verify.status if self.verify else Status.UNCHECKED
+
+    @property
+    def pwd_verified(self) -> bool:
+        return bool(self.verify and self.verify.pwd_verified)
+
+    @property
+    def status_label(self) -> str:
+        """展示用状态：只有接口真正校验过提取码，才敢说"码已验证"。"""
+        if self.status is Status.ALIVE:
+            if self.pwd_verified:
+                return "有效(码已验证)"
+            return "有效(码未验证)" if self.pwd else "有效"
+        return self.status.label
 
     def open_url(self) -> str:
         """可直接打开的一键链接（百度带提取码）。"""
@@ -142,7 +164,7 @@ class Resource(BaseModel):
             "网盘": self.pan_type.label,
             "链接": self.open_url(),
             "提取码": self.pwd or "",
-            "状态": self.status.label,
+            "状态": self.status_label,
             "来源": "; ".join(self.sources[:3]),
             "命中次数": self.hit_count,
             "大小": self.size or "",

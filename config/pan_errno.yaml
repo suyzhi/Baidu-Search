@@ -1,0 +1,73 @@
+# 非百度网盘验活码表
+# 实测校准日期：2026-09-12（真实链接 + 伪造 ID 交叉验证）
+#
+# 每个服务一张表，Verifier 按此判定；接口变动时只改这里，不用改代码。
+# 各服务的 URL 形态：
+#   夸克     https://pan.quark.cn/s/<id>
+#   阿里云盘 https://www.alipan.com/s/<id>  或  https://www.aliyundrive.com/s/<id>
+#   115      https://115.com/s/<code>  或  115cdn.com / anxia.com
+#   天翼189  https://cloud.189.cn/t/<code>
+#
+# ===== 暂不支持验活的服务（不要误以为"未校验"= "有效"）=====
+#   迅雷  api-pan.xunlei.com 要求 captcha（error_code 9 captcha_invalid）
+#   UC    pc-api.uc.cn 对真实链接也返回 41027「分享不存在」，接口已变
+#   123   www.123pan.com/api/share/info 返回 SPA HTML（404），接口已变
+#   PikPak / 磁力  无公开匿名校验接口
+
+# 未知码的统一兜底：绝不宣称"存活"，也绝不宣称"失效"
+default: unknown
+
+services:
+  quark:
+    enabled: true
+    qps: 6.0
+    # POST https://drive-pc.quark.cn/1/clouddrive/share/sharepage/token
+    #      ?pr=ucpro&fr=pc&uc_param_str=      body: {"pwd_id": "<id>", "passcode": ""}
+    # 注意：passcode 传对传错都返回 code 0（该接口不校验提取码），所以夸克只判生死
+    code:
+      "0": alive
+      "41006": not_found
+    http:
+      "404": not_found
+
+  aliyun:
+    enabled: true
+    qps: 6.0
+    # POST https://api.aliyundrive.com/adrive/v3/share_link/get_share_by_anonymous
+    #      body: {"share_id": "<id>"}
+    # 注意 code 里带点号：ShareLink.Cancelled / NotFound.ShareLink
+    code:
+      "NotFound.ShareLink": not_found
+      "ShareLink.Cancelled": dead
+      "ShareLink.Expired": dead
+      "ShareLinkExpired": dead
+    # 精确 code 对不上时的模糊兜底（接口改文案时不至于全变 unknown）
+    code_contains:
+      "NotFound": not_found
+      "Cancelled": dead
+      "Expired": dead
+    http:
+      "404": not_found
+
+  "115":
+    enabled: true
+    qps: 3.0
+    # GET https://webapi.115.com/share/snap
+    #     ?share_code=<code>&offset=0&limit=10&receive_code=<pwd>
+    errno:
+      "0": alive
+      "4100012": need_pwd      # 请输入访问码
+      "4100008": wrong_pwd     # 访问码错误
+      "990002": not_found      # 参数错误
+    state_false_default: not_found
+
+  tianyi:
+    enabled: true
+    qps: 3.0
+    # GET https://cloud.189.cn/api/open/share/getShareInfoByCodeV2.action?shareCode=<code>
+    # 返回 XML：正常为 <shareVO>，失效为 <error><code>ShareInfoNotFound</code>
+    xml:
+      "ShareInfoNotFound": not_found
+      "ShareInfoInvalid": dead
+    http:
+      "400": not_found

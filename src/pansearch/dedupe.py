@@ -46,11 +46,14 @@ def build_resources(hits: Iterable[RawHit]) -> list[Resource]:
                 kinds=[hit.kind],
                 origins=[hit.origin] if hit.origin else [],
                 hit_count=1,
+                from_primary=not hit.relaxed,
             )
             continue
 
         # 合并
         res.hit_count += 1
+        if not hit.relaxed:
+            res.from_primary = True
         if hit.pwd and not res.pwd:
             res.pwd = hit.pwd
         res.title = _pick_longer(res.title, hit.title)

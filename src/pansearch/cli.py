@@ -69,9 +69,9 @@ def _render(resources: list[Resource], outcome, *, show_origins: bool) -> None:
     for i, res in enumerate(resources, 1):
         style = STATUS_STYLE.get(res.status, "")
         head = (
-            f"[{style}]{res.status.label}[/{style}]"
+            f"[{style}]{res.status_label}[/{style}]"
             if style
-            else res.status.label
+            else res.status_label
         )
         meta = [res.pan_type.label]
         if res.hit_count > 1:
@@ -105,13 +105,40 @@ def _summary(outcome, resources: list[Resource]) -> Panel:
         f"原始命中 [bold]{outcome.raw_hits}[/bold] → 去重 [bold]{outcome.dedup_count}[/bold] → 本次显示 [bold]{len(resources)}[/bold]"
         + (f"（{ '、'.join(parts) }）" if parts else ""),
     ]
+    if len(outcome.queries_used) > 1:
+        lines.append(
+            f"[dim]原始查询召回不足，已自动补搜：{'、'.join(outcome.queries_used[1:])}[/dim]"
+        )
     if vstats:
+        pruned = outcome.pruned
         lines.append(
             f"验活：存活 [green]{vstats.get('alive', 0)}[/green] ｜ "
             f"失效 [red]{vstats.get('dead', 0)}[/red] ｜ "
+            f"剔除 [bold]{pruned}[/bold] ｜ "
             f"缓存命中 {vstats.get('cache_hit', 0)} ｜ "
             f"实际请求 {vstats.get('checked', 0)}"
         )
+        by_service = vstats.get("by_service") or {}
+        if by_service:
+            seg = []
+            for name, s in sorted(by_service.items(), key=lambda kv: -kv[1]["checked"]):
+                seg.append(
+                    f"{name} {s['alive']}活/{s['dead']}死"
+                    + (f"/{s['other']}其他" if s.get("other") else "")
+                )
+            lines.append("[dim]按网盘：" + " ｜ ".join(seg) + "[/dim]")
+        unsupported = vstats.get("unsupported", 0)
+        if unsupported and outcome.strict:
+            lines.append(
+                f"[dim]已按严格模式剔除 {unsupported} 条不支持验活的网盘"
+                f"（迅雷/UC/123/PikPak/磁力）[/dim]"
+            )
+        elif unsupported:
+            lines.append(
+                f"[yellow]⚠ 保留 {unsupported} 条不支持验活的网盘结果"
+                f"（迅雷/UC/123/PikPak/磁力），它们**未经验证**，可能已失效；"
+                f"加 --strict 可一并剔除[/yellow]"
+            )
     if outcome.errors:
         for name, err in outcome.errors.items():
             lines.append(f"[yellow]⚠ {name} 失败：{_truncate(err, 120)}[/yellow]")
@@ -125,6 +152,7 @@ def search(
     source: Optional[str] = typer.Option(None, "--source", "-s", help="限定数据源（如 pansou）"),
     limit: int = typer.Option(30, "--limit", "-n", help="最多显示多少条"),
     show_all: bool = typer.Option(False, "--all", "-a", help="包含已失效的结果"),
+    strict: bool = typer.Option(False, "--strict", help="严格模式：连码错的、无法验活的也一并剔除"),
     no_verify: bool = typer.Option(False, "--no-verify", help="跳过有效性校验（快很多，但不知道链接死活）"),
     show_origins: bool = typer.Option(False, "--origins", help="额外打印来源页面"),
     json_out: Optional[Path] = typer.Option(None, "--json", help="结果导出为 JSON"),
@@ -134,7 +162,7 @@ def search(
     types = _parse_types(type)
     sources = [s.strip() for s in source.split(",")] if source else None
 
-    with console.status("[cyan]正在并发检索全网数据源…[/cyan]"):
+    with console.status("[cyan]正在并发检索全网数据源并校验链接有效性…[/cyan]"):
         outcome = asyncio.run(
             run_search(
                 keyword,
@@ -142,6 +170,7 @@ def search(
                 source_names=sources,
                 do_verify=not no_verify,
                 alive_only=not show_all,
+                strict=strict,
                 limit=None,
             )
         )
@@ -197,33 +226,46 @@ def search(
 
 @app.command()
 def verify(
-    url: str = typer.Argument(..., help="百度网盘分享链接"),
+    url: str = typer.Argument(..., help="网盘分享链接"),
     pwd: Optional[str] = typer.Option(None, "--pwd", "-p", help="提取码"),
     no_cache: bool = typer.Option(False, "--no-cache", help="忽略缓存重新校验"),
 ) -> None:
-    """校验单条百度网盘链接是否有效。"""
+    """校验单条网盘链接是否有效（支持百度/夸克/阿里/115/天翼）。"""
     from .dedupe import build_resources
     from .models import RawHit
-    from .verify import BaiduVerifier
+    from .verifiers import VerifierPool
 
-    res = build_resources(
-        [RawHit(source="cli", kind="manual", url=url, pwd=pwd)]
-    )
-    if not res:
-        console.print("[red]无法识别的链接（目前只支持百度网盘分享链接）[/red]")
+    resources = build_resources([RawHit(source="cli", kind="manual", url=url, pwd=pwd)])
+    if not resources:
+        console.print("[red]无法识别的链接（支持百度网盘 / 夸克 / 阿里云盘 / 115 / 天翼189）[/red]")
         raise typer.Exit(1)
 
-    target = res[0]
+    target = resources[0]
 
     async def _run():
-        async with BaiduVerifier() as verifier:
-            return await verifier.verify(target, use_cache=not no_cache)
+        async with VerifierPool() as pool:
+            if not pool.supports(target.pan_type):
+                return None
+            return await pool.verify(target, use_cache=not no_cache)
 
     result = asyncio.run(_run())
+    if result is None:
+        console.print(
+            f"[yellow]{target.pan_type.label} 暂不支持验活（接口需要验证码或已变更）[/yellow]"
+        )
+        raise typer.Exit(2)
+
     style = STATUS_STYLE.get(result.status, "")
+    detail = f"method={result.method}"
+    if result.errno is not None:
+        detail += f"  errno={result.errno}"
+    if result.status is Status.ALIVE:
+        label = ("有效(码已验证)" if result.pwd_verified
+                 else ("有效(码未验证)" if target.pwd else "有效"))
+    else:
+        label = result.status.label
     console.print(
-        f"[{style}]{result.status.label}[/{style}]  "
-        f"surl={target.surl}  errno={result.errno}  method={result.method}"
+        f"[{style}]{label}[/{style}]  {target.pan_type.label}  {detail}"
         + (f"  [dim]{result.note}[/dim]" if result.note else "")
     )
 

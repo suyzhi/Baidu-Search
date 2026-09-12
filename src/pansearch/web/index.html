@@ -101,6 +101,9 @@
     <span class="chip" data-type="uc">UC</span>
     <span class="chip" data-type="magnet">磁力</span>
     <label class="toggle"><input type="checkbox" id="aliveOnly" checked> 只看存活</label>
+    <label class="toggle" title="连「提取码不对」和「不支持验活的网盘（迅雷/UC/123/PikPak/磁力）」也一并剔除">
+      <input type="checkbox" id="strict"> 严格剔除
+    </label>
     <label class="toggle"><input type="checkbox" id="doVerify" checked> 校验链接</label>
   </div>
 
@@ -131,6 +134,7 @@ document.querySelectorAll('#typeFilters .chip').forEach(chip => {
 $('#kw').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
 goBtn.onclick = doSearch;
 $('#aliveOnly').onchange = () => { if ($('#kw').value.trim()) doSearch(); };
+$('#strict').onchange = () => { if ($('#kw').value.trim()) doSearch(); };
 
 function esc(s){
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
@@ -164,7 +168,8 @@ async function doSearch(){
   statsEl.classList.remove('show');
 
   const params = new URLSearchParams({kw, limit: 100,
-    alive_only: $('#aliveOnly').checked, verify: $('#doVerify').checked});
+    alive_only: $('#aliveOnly').checked, verify: $('#doVerify').checked,
+    strict: $('#strict').checked});
   if (activeType) params.set('types', activeType);
 
   const t0 = Date.now();
@@ -183,6 +188,7 @@ function render(data, secs){
   const parts = [];
   parts.push('原始命中 <b>' + data.raw_hits + '</b>');
   parts.push('去重 <b>' + data.dedup_count + '</b>');
+  if (data.pruned) parts.push('<span style="color:var(--red)">剔除失效 <b>' + data.pruned + '</b></span>');
   parts.push('显示 <b>' + data.shown + '</b>');
   parts.push('存活 <b>' + data.alive_count + '</b>');
   const vs = data.verify_stats || {};
@@ -193,6 +199,32 @@ function render(data, secs){
   parts.push('数据源 <b>' + (data.used_sources || []).join(' + ') + '</b>');
 
   let html = parts.join(' ｜ ');
+
+  const qs = data.queries_used || [];
+  if (qs.length > 1) {
+    html += '<br><span style="color:var(--dim)">原始查询召回不足，已自动补搜：' +
+      qs.slice(1).map(esc).join('、') + '</span>';
+  }
+
+  const bs = vs.by_service || {};
+  const names = Object.keys(bs);
+  if (names.length) {
+    html += '<br><span style="color:var(--dim)">按网盘验活：' + names.map(n => {
+      const s = bs[n];
+      return esc(n) + ' <span style="color:var(--green)">' + s.alive + '活</span>/' +
+             '<span style="color:var(--red)">' + s.dead + '死</span>' +
+             (s.other ? '/' + s.other + '其他' : '');
+    }).join(' ｜ ') + '</span>';
+  }
+  if (vs.unsupported) {
+    html += data.strict
+      ? '<br><span style="color:var(--dim)">已按严格模式剔除 ' + vs.unsupported +
+        ' 条不支持验活的网盘（迅雷/UC/123/PikPak/磁力）</span>'
+      : '<br><span style="color:var(--yellow)">⚠ 保留 ' + vs.unsupported +
+        ' 条不支持验活的网盘结果（迅雷/UC/123/PikPak/磁力），它们<strong>未经验证</strong>，' +
+        '可能已失效 —— 勾选「严格剔除」可一并去掉</span>';
+  }
+
   const errs = Object.entries(data.errors || {});
   if (errs.length) {
     html += '<br><span style="color:var(--yellow)">⚠ ' +

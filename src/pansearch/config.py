@@ -31,9 +31,15 @@ def errno_config() -> dict:
     return _load("baidu_errno.yaml")
 
 
+@lru_cache(maxsize=1)
+def pan_errno_config() -> dict:
+    return _load("pan_errno.yaml")
+
+
 def reload_config() -> None:
     sources_config.cache_clear()
     errno_config.cache_clear()
+    pan_errno_config.cache_clear()
 
 
 def source_cfg(name: str) -> dict:

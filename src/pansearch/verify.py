@@ -172,7 +172,12 @@ class BaiduVerifier:
                             status = alt
                             note = f"提取码错误且链接不可用（shorturlinfo errno={alt_errno}）"
                     result = VerifyResult(
-                        status=status, errno=errno, method="share_verify", note=note
+                        status=status,
+                        errno=errno,
+                        method="share_verify",
+                        note=note,
+                        # share/verify 返回 0 说明提取码确实被服务端校验通过
+                        pwd_verified=status is Status.ALIVE,
                     )
             else:
                 # shorturlinfo 必须用「完整 token（带开头 1）」，否则恒返回 2（假阳性）

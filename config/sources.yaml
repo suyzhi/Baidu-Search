@@ -62,11 +62,17 @@ sources:
 
 verify:
   enabled: true
-  concurrency: 4
-  rate_limit_qps: 3.0     # 对 pan.baidu.com 温柔一点
+  concurrency: 12         # 跨网盘并发；每个网盘另有自己的限速
+  rate_limit_qps: 4.0     # 百度专用（对 pan.baidu.com 温柔一点）
   cache_ttl_hours: 6
   timeout: 20
   retries: 2
+  # 各网盘验活的独立限速（覆盖 config/pan_errno.yaml 里的 qps）
+  services:
+    quark:  {qps: 6.0}
+    aliyun: {qps: 6.0}
+    "115":  {qps: 4.0}
+    tianyi: {qps: 4.0}
 
 scoring:
   kind_weight:
@@ -84,6 +90,7 @@ scoring:
     unknown: 0.3
     dead: 0.02
     not_found: 0.0
-  multi_source_bonus: 0.25   # 多源命中加成（每条额外来源）
+  multi_source_bonus: 0.25   # 多源命中加成：每多一个来源相对提升 25%（封顶 +50%）
   freshness_halflife_days: 730
-  pan_priority_bonus: 0.3    # 百度优先
+  pan_priority_bonus: 0.3    # 百度优先：相对提升 30%（乘法因子，不做排序层级）
+  relaxed_penalty: 0.5       # 只被"放宽查询"命中的结果降权为 50%
