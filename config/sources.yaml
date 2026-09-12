@@ -118,8 +118,15 @@ sources:
     page_timeout: 10
     page_concurrency: 8
     engines:
-      brave: "https://search.brave.com/search?q={q}"
-      so: "https://www.so.com/s?q={q}"
+      # 实测（2026-09）逐个引擎的结果：
+      #   brave    429 长期限流                       ❌ 白耗 3s
+      #   so.com   200 但只有 9.8KB 反爬空壳页        ❌ 白耗 2.7s
+      #   bing     200，结果页直接含 pan.baidu 链接   ✅
+      #   ddg      200，结果页直接含 pan.baidu 链接   ✅
+      #   另测 startpage / marginalia / searx / yandex / ecosia 均零网盘结果或 403。
+      # 两个失效引擎的组合会让这个源恒定 0 条却每次都耗 3~8 秒。
+      bing: "https://cn.bing.com/search?q={q}"
+      ddg: "https://html.duckduckgo.com/html/?q={q}"
     templates:
       - 'site:pan.baidu.com/s {kw}'
       - '"{kw}" 百度网盘 提取码'

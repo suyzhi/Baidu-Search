@@ -29,8 +29,13 @@ from ..util import RateLimiter
 from .base import Adapter, register
 
 DEFAULT_ENGINES = {
-    "brave": "https://search.brave.com/search?q={q}",
-    "so": "https://www.so.com/s?q={q}",
+    # 实测（2026-09）可用性：
+    #   bing / duckduckgo-html  200，结果页里直接含 pan.baidu 链接 ✅
+    #   brave                   429（长期限流）
+    #   so.com                  200 但只有 9.8KB 的反爬空壳页 ❌
+    #   startpage/marginalia/searx/yandex/ecosia  200 但零网盘结果或 403 ❌
+    "bing": "https://cn.bing.com/search?q={q}",
+    "ddg": "https://html.duckduckgo.com/html/?q={q}",
 }
 
 DEFAULT_TEMPLATES = [
