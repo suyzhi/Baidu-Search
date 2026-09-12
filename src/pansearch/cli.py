@@ -154,6 +154,7 @@ def search(
     show_all: bool = typer.Option(False, "--all", "-a", help="包含已失效的结果"),
     strict: bool = typer.Option(False, "--strict", help="严格模式：连码错的、无法验活的也一并剔除"),
     relax: bool = typer.Option(True, "--relax/--no-relax", help="多词查询时自动补搜主词（默认开，大幅提升召回）"),
+    verify_budget: int = typer.Option(None, "--verify-budget", help="最多验活多少条（默认取配置，0=不限制）"),
     no_verify: bool = typer.Option(False, "--no-verify", help="跳过有效性校验（快很多，但不知道链接死活）"),
     show_origins: bool = typer.Option(False, "--origins", help="额外打印来源页面"),
     json_out: Optional[Path] = typer.Option(None, "--json", help="结果导出为 JSON"),
@@ -173,6 +174,7 @@ def search(
                 alive_only=not show_all,
                 strict=strict,
                 relax=relax,
+                verify_budget=verify_budget,
                 limit=None,
             )
         )

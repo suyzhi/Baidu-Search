@@ -60,20 +60,23 @@ class TelegramAdapter(Adapter):
             if not links:
                 continue
             for link in links:
-                url = (link or {}).get("url")
-                if not url:
-                    continue
-                hits.append(
-                    RawHit(
-                        source=f"tg:{row['channel']}",
-                        kind="tg",
-                        url=url,
-                        pwd=(link.get("pwd") or pwd_from_url(url)),
-                        title=title,
-                        shared_at=posted,
-                        origin=origin,
+                try:
+                    url = (link or {}).get("url")
+                    if not url:
+                        continue
+                    hits.append(
+                        RawHit(
+                            source=f"tg:{row['channel']}",
+                            kind="tg",
+                            url=url,
+                            pwd=(link.get("pwd") or pwd_from_url(url)),
+                            title=title,
+                            shared_at=posted,
+                            origin=origin,
+                        )
                     )
-                )
+                except Exception:
+                    continue
         return hits
 
 

@@ -37,15 +37,22 @@ docker pull "$IMAGE"
 docker rm -f pansou >/dev/null 2>&1 || true
 
 echo "启动容器（端口 $PORT）…"
+# ASYNC_RESPONSE_TIMEOUT 决定"冷查询等多久"：异步模式下超时就先返回已拿到的
+# 部分结果，后台继续跑并写缓存 —— 所以调小是纯赚（首次快，后续查询拿全量）。
+# 实测 8s -> 4s 时首次查询耗时减半，命中数基本不变。
+docker volume create pansou-cache >/dev/null
+
 docker run -d --name pansou --restart unless-stopped \
   -p "${PORT}:8888" \
+  -v pansou-cache:/app/cache \
   -e PORT=8888 \
   -e CHANNELS="$CHANNELS" \
   -e ENABLED_PLUGINS="$PLUGINS" \
-  -e CACHE_ENABLED=true -e CACHE_TTL=300 \
+  -e CACHE_ENABLED=true -e CACHE_TTL=900 \
   -e ASYNC_PLUGIN_ENABLED=true \
-  -e ASYNC_RESPONSE_TIMEOUT=8 \
-  -e ASYNC_MAX_BACKGROUND_WORKERS=30 \
+  -e ASYNC_RESPONSE_TIMEOUT=4 \
+  -e ASYNC_CACHE_TTL_HOURS=6 \
+  -e ASYNC_MAX_BACKGROUND_WORKERS=40 \
   "$IMAGE"
 
 echo

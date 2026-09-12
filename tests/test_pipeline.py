@@ -27,13 +27,39 @@ def test_relaxed_queries_multiword(kw, expected):
     assert relaxed_queries(kw) == expected
 
 
-@pytest.mark.parametrize("kw", ["沙丘", "三体", "", "  "])
+@pytest.mark.parametrize(
+    "kw,expected",
+    [
+        # 实测「沙丘 2」曾拆出补搜词 "2"，而索引里 18.4 万条消息含 "2"（占 87%）
+        ("沙丘 2", ["沙丘"]),
+        ("沙丘 2024", ["沙丘"]),
+        ("沙丘、2", ["沙丘"]),
+        ("阿凡达 2 4K", ["阿凡达", "4K"]),
+        ("2 沙丘", ["沙丘"]),          # 主词无区分度时，只能靠限定词
+        ("1 2", []),                  # 全是无区分度的词 -> 不补搜
+    ],
+)
+def test_relaxed_queries_filters_useless_terms(kw, expected):
+    assert relaxed_queries(kw) == expected
+
+
+@pytest.mark.parametrize("kw", ["沙丘", "三体", "", "  ", "2", "2024"])
 def test_relaxed_queries_single_word_is_noop(kw):
     assert relaxed_queries(kw) == []
 
 
 def test_relaxed_queries_never_repeats_original():
     assert "沙丘 4K HDR" not in relaxed_queries("沙丘 4K HDR")
+
+
+async def test_useless_relaxed_term_is_not_queried(monkeypatch):
+    """「沙丘 2」不该再去补搜 "2"（那是全库扫描，白等几十秒）。"""
+    adapter = StubAdapter({}, _quark_hits(2))
+    monkeypatch.setattr(pipeline, "build_adapters", lambda names=None: [adapter])
+    monkeypatch.setattr(pipeline, "VerifierPool", StubPool)
+
+    await search("沙丘 2", do_verify=True, alive_only=False, relax=True, verify_budget=0)
+    assert adapter.calls == ["沙丘 2", "沙丘"]
 
 
 # ---------------------------------------------------------------- 桩

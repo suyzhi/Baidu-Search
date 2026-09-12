@@ -6,9 +6,39 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import SplitResult, parse_qs, unquote, urlsplit
 
 from .models import PanType
+
+# urlsplit 对某些畸形 URL 会抛 ValueError，而 URL 来自外部数据（聚合引擎的 JSON、
+# 抓到的页面），不能让它把整批结果带走。典型触发：netloc 里有全角字符
+#   http://|file|电影：2026.mkv|2260
+#   -> ValueError: netloc '|file|电影：2026.mkv|2260' contains invalid characters
+#      under NFKC normalization
+_EMPTY_SPLIT = SplitResult(scheme="", netloc="", path="", query="", fragment="")
+_SCHEME_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.\-]*)://(.*)$", re.S)
+
+
+def safe_urlsplit(url: str) -> SplitResult:
+    """永不抛异常的 urlsplit。解析失败时退化为"整串当作 path"。"""
+    if not isinstance(url, str):
+        return _EMPTY_SPLIT
+    try:
+        return urlsplit(url)
+    except ValueError:
+        m = _SCHEME_RE.match(url)
+        if m:
+            return SplitResult(scheme=m.group(1), netloc="", path=m.group(2),
+                               query="", fragment="")
+        return SplitResult(scheme="", netloc="", path=url, query="", fragment="")
+
+
+def safe_hostname(url: str) -> str:
+    """永不抛异常地取 hostname（小写）。畸形 URL 返回空串。"""
+    try:
+        return (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
 
 # 域名 → 网盘类型（按先后顺序匹配后缀）
 _HOST_RULES: list[tuple[str, PanType]] = [
@@ -61,7 +91,7 @@ def detect_pan_type(url: str) -> PanType:
     """从 URL 判断网盘类型。"""
     if url.startswith("magnet:"):
         return PanType.MAGNET
-    host = (urlparse(url).hostname or "").lower()
+    host = safe_hostname(url)
     if not host:
         return PanType.OTHER
     for suffix, pan in _HOST_RULES:
@@ -88,10 +118,10 @@ def pwd_from_url(url: str) -> str | None:
     m = URL_PWD_RE.search(url)
     if m:
         return m.group(1)
-    frag = urlparse(url).fragment
+    frag = safe_urlsplit(url).fragment
     if frag and re.fullmatch(r"[A-Za-z0-9]{4}", frag):
         return frag
-    qs = parse_qs(urlparse(url).query)
+    qs = parse_qs(safe_urlsplit(url).query)
     for k in ("pwd", "password", "passwd", "code"):
         v = qs.get(k)
         if v and re.fullmatch(r"[A-Za-z0-9]{4}", v[0]):
@@ -116,7 +146,7 @@ def parse_baidu(url: str) -> tuple[str | None, str | None]:
     if m:
         return m.group(1), pwd
 
-    qs = parse_qs(urlparse(decoded).query)
+    qs = parse_qs(safe_urlsplit(decoded).query)
     surl = (qs.get("surl") or [None])[0]
     if surl:
         return surl, pwd
@@ -134,7 +164,7 @@ def normalize_url(pan_type: PanType, url: str, surl: str | None, pwd: str | None
         return f"https://pan.baidu.com/s/{surl}"
     if pan_type is PanType.MAGNET:
         return url.split("&dn=")[0]
-    parsed = urlparse(url)
+    parsed = safe_urlsplit(url)
     if parsed.scheme and parsed.netloc:
         # 去掉跟踪参数，保留路径
         return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
@@ -150,7 +180,7 @@ def resource_key(pan_type: PanType, url: str, surl: str | None) -> str:
         if m:
             return f"magnet:{m.group(1).lower()}"
         return f"magnet:{url}"
-    parsed = urlparse(url)
+    parsed = safe_urlsplit(url)
     path = parsed.path.rstrip("/")
     if path:
         return f"{pan_type.value}:{parsed.hostname}{path}"

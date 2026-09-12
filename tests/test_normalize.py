@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pansearch.models import PanType
 from pansearch.normalize import (
     detect_pan_type,
@@ -92,3 +94,48 @@ def test_resource_key_magnet_case_insensitive():
 
 def test_resource_key_baidu_uses_surl():
     assert resource_key(PanType.BAIDU, "https://pan.baidu.com/s/1abc?pwd=1", "1abc") == "baidu:1abc"
+
+
+# ---------------------------------------------------------------- 畸形 URL 稳健性
+# urlsplit 对 netloc 里带全角字符的 URL 会抛
+#   ValueError: netloc '...' contains invalid characters under NFKC normalization
+# 这些 URL 来自外部数据（聚合引擎 JSON / 抓到的页面），一个坏链接就能把整个
+# 数据源的结果带走 —— 所以所有解析函数都必须不抛异常。
+NFKC_BAD_URLS = [
+    "http://|file|电影：2026.mkv|2260",       # 全角冒号
+    "http://a：b/x",
+    "magnet://|file|测试：片名|123",
+    "http://a＠b/x",                          # 全角 @
+    "http://a／b/x",                          # 全角斜杠
+]
+
+
+@pytest.mark.parametrize("url", NFKC_BAD_URLS)
+def test_detect_pan_type_never_raises(url):
+    assert detect_pan_type(url) in set(PanType)
+
+
+@pytest.mark.parametrize("url", NFKC_BAD_URLS)
+def test_all_parsers_survive_malformed_urls(url):
+    from pansearch.verifiers import path_id
+
+    pwd_from_url(url)                       # 不抛即通过
+    parse_baidu(url)
+    path_id(url)
+    normalize_url(PanType.OTHER, url, None, None)
+    resource_key(PanType.OTHER, url, None)
+
+
+def test_safe_urlsplit_falls_back_gracefully():
+    from pansearch.normalize import safe_hostname, safe_urlsplit
+
+    assert safe_hostname("http://a：b/x") == ""
+    split = safe_urlsplit("http://a：b/x")
+    assert split.path                      # 退化成 path，但拿到了内容
+    assert safe_urlsplit(None).path == ""  # type: ignore[arg-type]
+
+
+def test_safe_hostname_normal_case():
+    from pansearch.normalize import safe_hostname
+
+    assert safe_hostname("https://Pan.Baidu.com/s/1abc") == "pan.baidu.com"

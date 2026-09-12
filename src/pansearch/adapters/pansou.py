@@ -82,25 +82,30 @@ class PansouAdapter(Adapter):
 
         for _ptype, items in merged.items():
             for item in items or []:
-                url = (item.get("url") or "").strip()
-                if not url:
-                    continue
-                pan_type = detect_pan_type(url)
-                if pan_type is PanType.OTHER:
-                    continue
-                raw_source = str(item.get("source") or _ptype)
-                kind = "tg" if raw_source.startswith("tg:") else "pansou"
-                hits.append(
-                    RawHit(
-                        source=raw_source,
-                        kind=kind,
-                        url=url,
-                        pwd=item.get("password") or pwd_from_url(url),
-                        title=_clean_note(item.get("note")),
-                        shared_at=_parse_time(item.get("datetime")),
-                        origin=None,
+                try:
+                    url = (item.get("url") or "").strip()
+                    if not url:
+                        continue
+                    pan_type = detect_pan_type(url)
+                    if pan_type is PanType.OTHER:
+                        continue
+                    raw_source = str(item.get("source") or _ptype)
+                    kind = "tg" if raw_source.startswith("tg:") else "pansou"
+                    hits.append(
+                        RawHit(
+                            source=raw_source,
+                            kind=kind,
+                            url=url,
+                            pwd=item.get("password") or pwd_from_url(url),
+                            title=_clean_note(item.get("note")),
+                            shared_at=_parse_time(item.get("datetime")),
+                            origin=None,
+                        )
                     )
-                )
+                except Exception:
+                    # 单条数据畸形（实测有插件返回 netloc 带全角冒号的伪 URL）
+                    # 不能让它把整个数据源的结果带走
+                    continue
         return hits
 
 

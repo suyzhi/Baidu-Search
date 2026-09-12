@@ -147,6 +147,36 @@ async def test_empty_payload_returns_no_hits():
         assert await adapter.search("三体", client) == []
 
 
+async def test_one_malformed_item_does_not_kill_the_batch():
+    """回归：某个插件返回 netloc 带全角冒号的伪 URL，曾导致整条 ValueError
+    把 PanSou 的所有结果带走（摘要里表现为 "pansou 失败"）。"""
+    payload = {
+        "code": 0,
+        "data": {
+            "total": 3,
+            "merged_by_type": {
+                "baidu": [
+                    {"url": "https://pan.baidu.com/s/1AAA", "source": "plugin:good"},
+                    {"url": "http://|file|电影：2026.mkv|2260", "source": "plugin:bad"},
+                    {"url": "https://pan.quark.cn/s/cccc", "source": "plugin:good2"},
+                ],
+            },
+        },
+    }
+
+    def handler(request):
+        return httpx.Response(200, json=payload)
+
+    adapter = make_adapter(["http://a"])
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        hits = await adapter.search("三体", client)
+
+    urls = {h.url for h in hits}
+    assert "https://pan.baidu.com/s/1AAA" in urls, "好数据必须保留"
+    assert "https://pan.quark.cn/s/cccc" in urls
+    assert len(hits) == 2, "坏数据被跳过，但不影响其余"
+
+
 def test_instances_default_and_normalized():
     adapter = PansouAdapter({})
     assert adapter.instances == ["https://so.252035.xyz"]

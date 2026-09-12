@@ -25,20 +25,45 @@ UA = (
 
 _TERM_SPLIT = re.compile(r"[\s,，、/|·]+")
 
+# 补搜词的最小长度：单字符没有区分度
+MIN_RELAX_TERM_LEN = 2
+
+
+def _usable_relaxed_term(term: str) -> bool:
+    """补搜词必须真的有区分度，否则不如不补。
+
+    实测踩过的坑：「沙丘 2」会拆出补搜词 "2"，而本地 TG 索引里有 18.4 万条消息
+    含 "2"（占 87%）—— 等于拿无意义的词全库扫描，白白拉长搜索时间，
+    还会把大量不相关结果塞进验活预算。
+    """
+    t = term.strip()
+    if len(t) < MIN_RELAX_TERM_LEN:
+        return False
+    if not any(ch.isalnum() for ch in t):   # 纯符号
+        return False
+    if t.isdigit():                          # "2" / "2024" 这类纯数字
+        return False
+    return True
+
 
 def relaxed_queries(kw: str) -> list[str]:
     """从多词查询派生放宽查询。
 
     PanSou 这类聚合引擎对多词查询召回很差：实测「沙丘 4K HDR」只有 3 条，
-    而「沙丘」有 180+ 条。所以原始查询召回不足时，补搜主词与剩余词。
+    而「沙丘」有 180+ 条。所以主查询之余补搜主词与限定词 —— 但要过滤掉
+    "2"、"2024" 这种毫无区分度的词（见 _usable_relaxed_term）。
     """
     parts = [p for p in _TERM_SPLIT.split(kw.strip()) if p]
     if len(parts) < 2:
         return []
-    candidates = [parts[0]]
-    tail = " ".join(parts[1:]).strip()
+
+    candidates: list[str] = []
+    if _usable_relaxed_term(parts[0]):
+        candidates.append(parts[0])
+    tail = " ".join(p for p in parts[1:] if _usable_relaxed_term(p)).strip()
     if tail:
         candidates.append(tail)
+
     return [q for q in dict.fromkeys(candidates) if q and q != kw.strip()]
 
 

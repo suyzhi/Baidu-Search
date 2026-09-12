@@ -18,12 +18,12 @@ from __future__ import annotations
 import asyncio
 import re
 from abc import ABC, abstractmethod
-from urllib.parse import urlparse
 
 import httpx
 
 from .config import pan_errno_config, verify_cfg
 from .models import PanType, Resource, Status, VerifyResult
+from .normalize import safe_urlsplit
 from .store import VerifyCache
 from .util import RateLimiter
 from .verify import BaiduVerifier
@@ -38,8 +38,8 @@ _ID_RE = re.compile(r"/(?:s|t)/([A-Za-z0-9_-]+)")
 
 
 def path_id(url: str) -> str | None:
-    """从网盘分享链接里取出分享 ID / code。"""
-    path = urlparse(url).path
+    """从网盘分享链接里取出分享 ID / code（对畸形 URL 也安全）。"""
+    path = safe_urlsplit(url).path
     m = _ID_RE.search(path)
     if m:
         return m.group(1)
