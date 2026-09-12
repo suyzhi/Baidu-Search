@@ -1,0 +1,116 @@
+# 候选资源站（域名  垂直领域[,领域...]）
+# 用 .cache/build_catalog.py 批量探测后写入 config/sites.yaml
+# 格式说明：域名后跟一个或多个垂直领域标签，空格分隔
+
+# ---- 软件 / 工具 ----
+www.ghxi.com              software
+www.423down.com           software
+www.dayanzai.me           software
+www.iplaysoft.com         software
+www.appinn.com            software
+www.ypojie.com            software
+www.zdfans.com            software
+www.muruoxi.com           software
+www.pc6.com               software
+www.xitongzhijia.net      software
+www.downxia.com           software
+www.cr173.com             software
+www.hackhome.com          software
+www.52pojie.cn            software
+bbs.pcbeta.com            software
+www.ggzha.com             software
+www.puresys.net           software
+www.lr51.com              software
+
+# ---- VST / 音频制作 ----
+audioz.download           audio-tool,music
+looptorrent.net           audio-tool,music
+4download.net             audio-tool,music
+vstorrent.org             audio-tool,music
+www.audiopluginguys.com   audio-tool
+vsthouse.ru               audio-tool
+plugintorrent.com         audio-tool
+www.audiosex.pro          audio-tool
+audio.tutsplus.com        audio-tool,course
+
+# ---- 影视 ----
+www.dytt8.net             movie
+www.btbtt.net             movie,tv
+www.zxzj.pro              movie,tv
+www.libvio.me             movie,tv
+www.pianku.li            movie,tv
+subhd.tv                  movie,tv
+assrt.net                 movie,tv
+www.yinfans.me            movie
+www.hdnow.net             movie
+www.66ys.tv               movie
+www.6v520.com             movie
+www.nunuyy.top            movie
+www.domp4.cc              movie
+www.pianku.tv             movie
+
+# ---- 动漫 / 漫画 ----
+www.agefans.tv            anime
+www.mgnacg.com            anime
+manhuagui.com             comic,anime
+www.copymanga.com         comic,anime
+dmzj.com                  comic,anime
+mikanani.me               anime
+share.dmhy.org            anime
+www.36mh.com              comic
+www.manhuadb.com          comic
+
+# ---- 音乐 ----
+www.hifini.com            music
+www.5nd.com               music
+bbs.music.cn              music
+www.51ape.com             music
+www.1ting.com             music
+music.163.com             music
+www.91flac.com            music
+www.musicool.cn           music
+
+# ---- 电子书 ----
+sobooks.net               ebook
+www.zxcs.me               ebook
+www.99lib.net             ebook
+www.jiumodiary.com        ebook
+zh.z-lib.gs               ebook,academic
+libgen.is                 ebook,academic
+annas-archive.org         ebook,academic
+www.xiaoshuo.com          ebook
+www.shuge.org             ebook
+www.zxcs.me               ebook
+
+# ---- 课程 / 教程 ----
+www.imooc.com             course
+study.163.com             course
+www.bilibili.com          course,general
+www.jikexueyuan.com       course
+www.runoob.com            course
+www.w3school.com.cn       course
+www.csdn.net              course
+
+# ---- 游戏 ----
+www.3dmgame.com           game
+www.ali213.net            game
+www.gamer520.com          game
+www.switch520.xyz         game
+www.9game.cn              game
+www.yxdown.com            game
+www.downkuai.com          game
+
+# ---- 设计 / 素材 ----
+www.zcool.com.cn          design
+www.ui.cn                 design
+www.shejidaren.com        design
+www.uisdc.com             design
+www.16xx8.com             design
+www.mizhi.com             design
+www.tuyiyi.com            design
+
+# ---- 学术 ----
+sci-hub.se                academic
+arxiv.org                 academic
+www.paperpass.com         academic
+scholar.google.com        academic

@@ -25,6 +25,8 @@ import httpx
 
 from ..extract import extract_from_text, html_to_text, page_title
 from ..models import RawHit
+from ..routing import GENERAL_VERTICAL, classify
+from ..sitecatalog import SiteEntry, SiteHealth, load_catalog
 from .base import Adapter, register
 
 UA = (
@@ -89,37 +91,78 @@ class SiteSearchAdapter(Adapter):
     name = "sitesearch"
     kind = "forum"
 
-    @property
-    def sites(self) -> list[dict]:
-        return self.cfg.get("sites") or DEFAULT_SITES
-
     def __init__(self, cfg: dict | None = None):
         super().__init__(cfg)
         self.max_pages = int(self.cfg.get("max_pages") or 6)
         self.page_timeout = float(self.cfg.get("page_timeout") or 12)
         self.page_sem = asyncio.Semaphore(int(self.cfg.get("page_concurrency") or 6))
         self.site_sem = asyncio.Semaphore(int(self.cfg.get("concurrency") or 3))
+        self.max_sites = int(self.cfg.get("max_sites") or 12)
+        self._health = SiteHealth() if self.cfg.get("health_tracking", True) else None
+        # 最近一次实际使用的站点，便于排查
+        self.last_selected: list[str] = []
+
+    # ---- 站点选择：目录 + 垂直路由 ----
+    def select_sites(self, kw: str) -> list[SiteEntry]:
+        """按查询的垂直领域从目录里挑站点。
+
+        覆盖"所有领域"意味着目录里会有几百个站，一次全打既慢又浪费；
+        所以先 classify 出领域，只打相关站 + 通用站。
+        """
+        catalog = load_catalog()
+        if not catalog:
+            # 目录还没建时退回内置清单，保证可用
+            catalog = [SiteEntry.from_dict(d) for d in DEFAULT_SITES]
+            for entry in catalog:
+                entry.verified = True
+
+        disabled = self._health.disabled() if self._health else set()
+        verticals = set(classify(kw)) or {GENERAL_VERTICAL}
+
+        picked: list[SiteEntry] = []
+        for entry in catalog:
+            if not (entry.search and entry.result_re and entry.verified):
+                continue
+            if entry.host in disabled:
+                continue
+            site_v = set(entry.verticals) or {GENERAL_VERTICAL}
+            if site_v & verticals or GENERAL_VERTICAL in site_v:
+                picked.append(entry)
+
+        # 配置里显式给的站点优先（便于临时测试某个站）
+        explicit = self.cfg.get("sites")
+        if explicit:
+            picked = [SiteEntry.from_dict(d) for d in explicit]
+
+        picked = picked[: self.max_sites]
+        self.last_selected = [e.name for e in picked]
+        return picked
 
     async def search(self, kw: str, client: httpx.AsyncClient) -> list[RawHit]:
-        jobs = [self._one_site(site, kw, client) for site in self.sites]
+        sites = self.select_sites(kw)
+        jobs = [self._one_site(site, kw, client) for site in sites]
         results = await asyncio.gather(*jobs, return_exceptions=True)
 
         hits: list[RawHit] = []
         seen: set[str] = set()
-        for result in results:
-            if isinstance(result, BaseException) or not result:
+        for site, result in zip(sites, results):
+            if isinstance(result, BaseException):
+                if self._health:
+                    self._health.record(site.host, 0, f"{type(result).__name__}")
                 continue
-            for hit in result:
+            if self._health:
+                self._health.record(site.host, len(result or []))
+            for hit in result or []:
                 if hit.url in seen:
                     continue
                 seen.add(hit.url)
                 hits.append(hit)
         return hits
 
-    async def _one_site(self, site: dict, kw: str, client: httpx.AsyncClient) -> list[RawHit]:
-        name = str(site.get("name") or "site")
-        search_tpl = site.get("search")
-        result_re = site.get("result_re")
+    async def _one_site(self, site: SiteEntry, kw: str, client: httpx.AsyncClient) -> list[RawHit]:
+        name = site.name or site.host
+        search_tpl = site.search
+        result_re = site.result_re
         if not search_tpl or not result_re:
             return []
         url = search_tpl.format(q=urllib.parse.quote(kw))

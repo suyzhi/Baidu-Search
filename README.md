@@ -221,6 +221,39 @@ PanSou 的 65 个插件也几乎不覆盖 —— 因为我们的频道全是影�
 配套修了一个抽取缺陷：**`URL_RE` 只匹配 http(s)，磁力链接从来没被抽取过**
 （之前的磁力全部来自 PanSou 的 JSON）。VST 音源基本都走磁力，不修这条等于白做。
 
+### 8️⃣ 从"几个垂直领域"扩到"所有领域"：目录 + 路由 + 自动探测
+
+要覆盖所有领域，站点清单不可能硬编码在源码里（早期就是 7 个写死的）。
+现在改成**数据驱动 + 自动探测**：
+
+```
+config/sites.yaml          资源站目录（域名 / 垂直领域 / 搜索模板 / 详情页正则）
+config/sites_candidates.txt 候选域名清单（待探测）
+pansearch sites probe <域名> 自动探测可用的搜索 URL 模板与详情页正则
+pansearch sites route <查询> 预览一次查询会走哪些垂直领域和站点
+pansearch sites health      站点健康度（连续失败的自动跳过）
+```
+
+**站点怎么加**：`pansearch sites probe www.example.com -v ebook` —— 探测器会试
+21 种常见搜索 URL 模板（WordPress `/?s=`、DSE `index.php?do=search`、
+Discuz、DedeCMS、帝国 CMS…），并**自动推导详情页正则**，直接写进目录。
+
+探测判据是**对照法**：同一个模板用真词搜一次、用无意义串搜一次，
+真词的结果条目要明显多于噪声。只看"页面里有没有关键词"会误判（很多站不回显关键词）。
+
+**垂直路由**：一次搜索不可能打几百个站（分钟级）。所以先识别查询领域：
+
+| 查询 | 识别结果 |
+|---|---|
+| 沙丘 4K HDR | `movie` |
+| Serum 合成器 / 大气合成器 | `audio-tool` |
+| 三体 电子书 | `ebook` |
+| Photoshop 破解 | `software` |
+| 论文 sci-hub | `academic` |
+
+只打相关领域的站 + 通用站；认不出领域就只打通用站（不乱打）。
+**健康度**则负责自动淘汰：连续失败 6 次的站会被跳过，不用手工维护清单。
+
 ### 8️⃣ 中文俗称搜不到英文资源
 
 中文用户搜「大气合成器」「血清」「康泰克」，资源站里只有 Omnisphere / Serum / Kontakt。
@@ -286,6 +319,8 @@ pan-sousuo/
 │   ├── sources.yaml          # 数据源开关 / 权重 / 限速 / 各源 deadline
 │   ├── tg_channels.txt       # 136 个 TG 网盘分享频道
 │   ├── aliases.yaml          # 中文俗称 → 实际检索词（大气合成器→Omnisphere）
+│   ├── sites.yaml            # 资源站目录（跨领域，含垂直标签）
+│   ├── sites_candidates.txt  # 待探测的候选域名
 │   ├── baidu_errno.yaml      # 百度 errno 码表（实测校准）
 │   └── pan_errno.yaml        # 夸克/阿里/115/天翼 码表（实测校准）
 ├── src/pansearch/
@@ -302,6 +337,8 @@ pan-sousuo/
 │   ├── dedupe.py             # 分享指纹去重合并
 │   ├── verify.py             # 百度验活（share/verify + shorturlinfo）
 │   ├── verifiers.py          # 验活调度池（夸克/阿里/115/天翼）+ 失效剔除 prune()
+│   ├── sitecatalog.py        # 资源站目录 + 搜索模板探测 + 健康度
+│   ├── routing.py            # 查询垂直领域识别（决定打哪些站）
 │   ├── score.py              # 排序打分（相关性幂次闸门 + 全乘法加成）
 │   ├── store.py              # SQLite 验活缓存 / 搜索日志
 │   ├── pipeline.py           # 并发编排（单源超时隔离 + 验活预算 + 放宽查询）

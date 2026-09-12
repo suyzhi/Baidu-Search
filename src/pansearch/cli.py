@@ -364,6 +364,136 @@ def index_stats() -> None:
         console.print(table)
 
 
+sites_app = typer.Typer(help="资源站目录：探测 / 列表 / 健康度 / 垂直路由")
+app.add_typer(sites_app, name="sites")
+
+
+@sites_app.command("list")
+def sites_list(
+    vertical: Optional[str] = typer.Option(None, "--vertical", "-v", help="只看某个垂直领域"),
+) -> None:
+    """列出资源站目录。"""
+    from .sitecatalog import load_catalog
+
+    catalog = load_catalog()
+    if not catalog:
+        console.print("[yellow]目录为空。用 pansearch sites probe <域名...> 探测并写入。[/yellow]")
+        return
+    rows = [s for s in catalog if not vertical or vertical in s.verticals]
+    table = Table(box=box.SIMPLE, header_style="bold cyan")
+    table.add_column("站点")
+    table.add_column("垂直领域")
+    table.add_column("搜索模板")
+    table.add_column("已验证")
+    for entry in sorted(rows, key=lambda x: (x.verticals[:1], x.host)):
+        table.add_row(entry.name, ",".join(entry.verticals) or "-",
+                      entry.search or "-", "✓" if entry.verified else "✗")
+    console.print(table)
+    console.print(f"[dim]共 {len(rows)} 个站点[/dim]")
+
+
+@sites_app.command("probe")
+def sites_probe(
+    domains: list[str] = typer.Argument(..., help="要探测的域名"),
+    vertical: str = typer.Option("general", "--vertical", "-v", help="写入目录时标注的垂直领域"),
+    concurrency: int = typer.Option(6, "--concurrency", "-c"),
+    save: bool = typer.Option(True, "--save/--no-save", help="把探到的结果写进 config/sites.yaml"),
+) -> None:
+    """探测域名可用的搜索 URL 模板，并可选写入目录。
+
+    判据是「真词 vs 无意义串」对照：真词的结果条目要明显多于噪声。
+    只看页面里有没有关键词会误判（很多站不回显关键词）。
+    """
+    import asyncio as _asyncio
+
+    from .sitecatalog import load_catalog, probe_many, save_catalog
+
+    console.print(f"[cyan]探测 {len(domains)} 个域名（每个最多试 21 种搜索模板）…[/cyan]")
+
+    def show(r) -> None:
+        if r.ok:
+            console.print(f"  [green]✓[/green] {r.domain:<26} {r.template:<46} "
+                          f"真={r.real_hits} 噪={r.noise_hits}")
+        else:
+            console.print(f"  [dim]✗ {r.domain:<26} {r.error}[/dim]")
+
+    results = _asyncio.run(probe_many(domains, concurrency=concurrency, on_result=show))
+    good = [r for r in results if r.ok]
+
+    if save and good:
+        from .sitecatalog import SiteEntry
+        existing = {e.host: e for e in load_catalog()}
+        for r in good:
+            existing[r.domain] = SiteEntry(
+                name=r.domain.split(".")[-2] if r.domain.count(".") >= 1 else r.domain,
+                domain=r.domain,
+                search=r.search,
+                # 详情页正则留空，由用户在目录里按站点结构补；留空则该站不参与搜索
+                result_re=existing.get(r.domain).result_re if existing.get(r.domain) else "",
+                verticals=[vertical],
+                verified=True,
+                note=f"probe: {r.template}",
+            )
+        path = save_catalog(list(existing.values()))
+        console.print(f"[green]已写入 {path}[/green]（{len(good)} 个可用）")
+    elif save:
+        console.print("[yellow]没有探到可用模板，目录未改动。[/yellow]")
+
+
+@sites_app.command("health")
+def sites_health(
+    reset: bool = typer.Option(False, "--reset", help="清空健康度记录"),
+) -> None:
+    """查看/重置站点健康度（连续失败的站会被自动跳过）。"""
+    from .sitecatalog import SiteHealth
+
+    health = SiteHealth()
+    try:
+        if reset:
+            health.conn.execute("DELETE FROM site_health")
+            health.conn.commit()
+            console.print("[green]已清空[/green]")
+            return
+        rows = health.stats()
+        disabled = health.disabled()
+    finally:
+        health.close()
+
+    if not rows:
+        console.print("[dim]还没有记录（跑几次搜索就有了）[/dim]")
+        return
+    table = Table(box=box.SIMPLE, header_style="bold cyan")
+    table.add_column("站点")
+    table.add_column("尝试", justify="right")
+    table.add_column("累计命中", justify="right")
+    table.add_column("连续失败", justify="right")
+    table.add_column("状态")
+    for domain, attempts, hits, ok_runs, fails, last_hits, last_error in rows:
+        table.add_row(domain, str(attempts), str(hits), str(fails),
+                      "[red]已跳过[/red]" if domain in disabled else "[green]正常[/green]")
+    console.print(table)
+
+
+@sites_app.command("route")
+def sites_route(
+    keyword: str = typer.Argument(..., help="查询词，看它会走哪些垂直领域和站点"),
+) -> None:
+    """预览一次查询的垂直路由结果（不实际发请求）。"""
+    from .adapters.sitesearch import SiteSearchAdapter
+    from .routing import classify
+
+    verticals = classify(keyword)
+    console.print(f"查询 [bold]{keyword}[/bold] -> 垂直领域 "
+                  f"[cyan]{', '.join(verticals) or '(无特征词，只用通用站)'}[/cyan]")
+    adapter = SiteSearchAdapter({"health_tracking": False})
+    sites = adapter.select_sites(keyword)
+    if not sites:
+        console.print("[yellow]没有匹配的站点[/yellow]")
+        return
+    for entry in sites:
+        console.print(f"  {entry.name:<18} [{','.join(entry.verticals) or '-'}] {entry.search}")
+
+
 @app.command()
 def web(
     host: str = typer.Option("127.0.0.1", help="监听地址"),

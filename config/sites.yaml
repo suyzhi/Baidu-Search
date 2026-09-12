@@ -1,0 +1,160 @@
+# 资源站目录（由 pansearch sites probe 生成/更新）
+# verticals 决定查询时是否命中该站；search 里的 {q} 会被替换成 URL 编码后的关键词。
+sites:
+- name: dmhy
+  domain: share.dmhy.org
+  verticals:
+  - anime
+  search: https://share.dmhy.org/?keyword={q}
+  result_re: https://share\.dmhy\.org/[a-z0-9-]+/[a-z0-9-]+/[a-z0-9-]+/\d+
+  verified: true
+  note: probe /?keyword={q}
+- name: 4download
+  domain: 4download.net
+  verticals:
+  - audio-tool
+  - music
+  search: https://4download.net/index.php?do=search&subaction=search&story={q}
+  result_re: https://4download\.net/[a-z0-9-]+\.html
+  verified: true
+  note: probe /index.php?do=search&subaction=search&story={q}
+- name: audioz
+  domain: audioz.download
+  verticals:
+  - audio-tool
+  - music
+  search: https://audioz.download/index.php?do=search&subaction=search&story={q}
+  result_re: https://audioz\.download/[a-z0-9-]+/[a-z0-9-]+/
+  verified: true
+  note: probe /index.php?do=search&subaction=search&story={q}
+- name: looptorrent
+  domain: looptorrent.net
+  verticals:
+  - audio-tool
+  - music
+  search: https://looptorrent.net/?s={q}
+  result_re: https://looptorrent\.net/[a-z0-9-]+/
+  verified: true
+  note: probe /?s={q}
+- name: plugintorrent
+  domain: plugintorrent.com
+  verticals:
+  - audio-tool
+  search: https://plugintorrent.com/?s={q}
+  result_re: https://plugintorrent\.com/[a-z0-9-]+/
+  verified: true
+  note: probe /?s={q}
+- name: vstorrent
+  domain: vstorrent.org
+  verticals:
+  - audio-tool
+  - music
+  search: https://vstorrent.org/?s={q}
+  result_re: https://vstorrent\.org/[a-z0-9-]+/
+  verified: true
+  note: probe /?s={q}
+- name: bilibili
+  domain: www.bilibili.com
+  verticals:
+  - course
+  - general
+  search: https://www.bilibili.com/search?keyword={q}
+  result_re: https://www\.bilibili\.com//[a-z0-9-]+\.[a-z0-9-]+\.[a-z0-9-]+/[a-z0-9-]+/[a-z0-9-]+/
+  verified: true
+  note: probe /search?keyword={q}
+- name: csdn
+  domain: www.csdn.net
+  verticals:
+  - course
+  search: https://www.csdn.net/?keyword={q}
+  result_re: https://www\.csdn\.net/[a-z0-9-]+/[a-z0-9-]+/[a-z0-9-]+/\d+
+  verified: true
+  note: probe /?keyword={q}
+- name: runoob
+  domain: www.runoob.com
+  verticals:
+  - course
+  search: https://www.runoob.com/?s={q}
+  result_re: https://www\.runoob\.com/[a-z0-9-]+/[a-z0-9-]+\.html
+  verified: true
+  note: probe /?s={q}
+- name: uisdc
+  domain: www.uisdc.com
+  verticals:
+  - design
+  search: https://www.uisdc.com/?s={q}
+  result_re: https://www\.uisdc\.com/[a-z0-9-]+
+  verified: true
+  note: probe /?s={q}
+- name: shuge
+  domain: www.shuge.org
+  verticals:
+  - ebook
+  search: https://www.shuge.org/search?q={q}
+  result_re: https://www\.shuge\.org/[a-z0-9-]+/[a-z0-9-]+/
+  verified: true
+  note: probe /search?q={q}
+- name: gamer520
+  domain: www.gamer520.com
+  verticals:
+  - game
+  search: https://www.gamer520.com/?s={q}
+  result_re: https://www\.gamer520\.com/\d+\.html
+  verified: true
+  note: probe /?s={q}
+- name: 423down
+  domain: www.423down.com
+  verticals:
+  - software
+  search: https://www.423down.com/?s={q}
+  result_re: https://www\.423down\.com/\d+\.html
+  verified: true
+  note: probe /?s={q}
+- name: appinn
+  domain: www.appinn.com
+  verticals:
+  - software
+  search: https://www.appinn.com/so/{q}
+  result_re: https://www\.appinn\.com/[a-z0-9-]+/
+  verified: true
+  note: probe /so/{q}
+- name: dayanzai
+  domain: www.dayanzai.me
+  verticals:
+  - software
+  search: https://www.dayanzai.me/?s={q}
+  result_re: https://www\.dayanzai\.me/[a-z0-9-]+\.html
+  verified: true
+  note: probe /?s={q}
+- name: ghxi
+  domain: www.ghxi.com
+  verticals:
+  - software
+  search: https://www.ghxi.com/?s={q}
+  result_re: https://www\.ghxi\.com/[a-z0-9-]+\.html
+  verified: true
+  note: probe /?s={q}
+- name: iplaysoft
+  domain: www.iplaysoft.com
+  verticals:
+  - software
+  search: https://www.iplaysoft.com/?s={q}
+  result_re: https://www\.iplaysoft\.com/[a-z0-9-]+\.html
+  verified: true
+  note: probe /?s={q}
+- name: puresys
+  domain: www.puresys.net
+  verticals:
+  - software
+  search: https://www.puresys.net/?s={q}
+  result_re: https://www\.puresys\.net/\d+\.html
+  verified: true
+  note: probe /?s={q}
+- name: ypojie
+  domain: www.ypojie.com
+  verticals:
+  - software
+  search: https://www.ypojie.com/so/{q}
+  result_re: https://www\.ypojie\.com/\d+\.html
+  verified: true
+  note: probe /so/{q}
