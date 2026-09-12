@@ -70,9 +70,42 @@ def test_path_shape(path, expected):
     assert _path_shape(path) == expected
 
 
+@pytest.mark.parametrize(
+    "path,expected",
+    [
+        # 回归：字符类少了下划线会在第一个 _ 处断掉，整条正则匹配不到任何详情页。
+        # 实测 dmhy 的 slug 是 725310_Fushigi_Yugi_TV_OVA_2025_11_12.html
+        ("/topics/view/725310_Fushigi_Yugi_TV_OVA_2025_11_12.html",
+         r"/[a-z0-9_-]+/[a-z0-9_-]+/\d+_[a-z0-9_-]+\.html"),
+        ("/comic/santi_huanchuangweilai/", r"/[a-z0-9_-]+/[a-z0-9_-]+/"),
+    ],
+)
+def test_path_shape_supports_underscores(path, expected):
+    assert _path_shape(path) == expected
+
+
 @pytest.mark.parametrize("path", ["/category/vst/", "/wp-json/", "/tag/abc/", "/feed"])
 def test_path_shape_rejects_site_noise(path):
     assert _path_shape(path) is None
+
+
+def test_derive_result_candidates_returns_multiple_shapes():
+    """回归：只取"最常见形状"会选错 —— dmhy 的分类列表链接（254 个）比
+    真详情页（35 个）多，推导出的正则指向列表页，于是被判"没有网盘链接"。
+    """
+    from pansearch.sitecatalog import derive_result_candidates
+
+    # 列表页链接故意放更多，详情页放更少
+    html = "".join(f'<a href="/topics/list/sort_id/{i}">c</a>' for i in range(1, 20))
+    html += "".join(
+        f'<a href="/topics/view/{700000 + i}_Some_Title_{i}.html">d</a>' for i in range(3)
+    )
+    cands = derive_result_candidates(html, "https://share.dmhy.org", top=3)
+    # 路径会被压成占位符（/topics/list/sort_id/2 -> /[a-z0-9_-]+/[a-z0-9_-]+/[a-z0-9_-]+/\d+），
+    # 所以不能靠字面量 "list" 判断，只能看结构
+    assert len(cands) >= 2, "必须给出多个候选，才能挑到真正的详情页形状"
+    assert any(c.endswith(r"/\d+") for c in cands), "列表页形状（以数字 ID 结尾）应在候选里"
+    assert any(".html" in c for c in cands), "真详情页形状（.html 结尾）必须被给出"
 
 
 def test_derive_result_re_picks_dominant_shape():
