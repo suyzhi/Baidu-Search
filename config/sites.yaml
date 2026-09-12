@@ -1,6 +1,14 @@
 # 资源站目录（由 pansearch sites probe 生成/更新）
 # verticals 决定查询时是否命中该站；search 里的 {q} 会被替换成 URL 编码后的关键词。
 sites:
+- name: dmhy
+  domain: share.dmhy.org
+  verticals:
+  - anime
+  search: https://share.dmhy.org/?keyword={q}
+  result_re: https://share\.dmhy\.org/[a-z0-9_-]+/[a-z0-9_-]+/\d+_[a-z0-9_-]+\.html
+  verified: true
+  note: probe /?keyword={q} yield=14
 - name: looptorrent
   domain: looptorrent.net
   verticals:
@@ -27,14 +35,6 @@ sites:
   result_re: https://vstorrent\.org/[a-z0-9_-]+/
   verified: true
   note: probe /?s={q} yield=30
-- name: runoob
-  domain: www.runoob.com
-  verticals:
-  - course
-  search: https://www.runoob.com/?s={q}
-  result_re: https://www\.runoob\.com//[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+/
-  verified: true
-  note: probe /?s={q} yield=4
 - name: gamer520
   domain: www.gamer520.com
   verticals:
@@ -48,9 +48,9 @@ sites:
   verticals:
   - software
   search: https://www.423down.com/?s={q}
-  result_re: https://www\.423down\.com/\d+\.html
+  result_re: https://www\.423down\.com/[a-z0-9_-]+\.html
   verified: true
-  note: probe /?s={q} yield=12
+  note: probe /?s={q} yield=5
 - name: dayanzai
   domain: www.dayanzai.me
   verticals:
@@ -67,6 +67,14 @@ sites:
   result_re: https://www\.ghxi\.com/[a-z0-9_-]+\.html
   verified: true
   note: probe /?s={q} yield=8
+- name: iplaysoft
+  domain: www.iplaysoft.com
+  verticals:
+  - software
+  search: https://www.iplaysoft.com/?s={q}
+  result_re: https://www\.iplaysoft\.com/[a-z0-9_-]+/\d+
+  verified: true
+  note: probe /?s={q} yield=1
 - name: puresys
   domain: www.puresys.net
   verticals:
