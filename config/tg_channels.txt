@@ -412,3 +412,19 @@ wechatshare
 wwwengshare
 xzxxn777
 zhetengsha
+
+# ---- 以下由 .cache/harvest_channels2.py 从频道大全采收并做价值校验 ----
+# 垂直领域: anime（1 个）
+tingtalk_op
+# 垂直领域: course（1 个）
+aliyungaoqingshipin
+# 垂直领域: ebook（2 个）
+pdf_001
+tongtiange
+# 垂直领域: movie（1 个）
+dianying4K
+# 垂直领域: software（4 个）
+SharedResources
+TVbox888
+fufeikc
+peekfun
