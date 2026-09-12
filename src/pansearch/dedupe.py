@@ -47,11 +47,14 @@ def build_resources(hits: Iterable[RawHit]) -> list[Resource]:
                 origins=[hit.origin] if hit.origin else [],
                 hit_count=1,
                 from_primary=not hit.relaxed,
+                queries=[hit.query] if hit.query else [],
             )
             continue
 
         # 合并
         res.hit_count += 1
+        if hit.query and hit.query not in res.queries:
+            res.queries.append(hit.query)
         if not hit.relaxed:
             res.from_primary = True
         if hit.pwd and not res.pwd:

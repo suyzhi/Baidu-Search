@@ -36,10 +36,16 @@ def pan_errno_config() -> dict:
     return _load("pan_errno.yaml")
 
 
+@lru_cache(maxsize=1)
+def alias_config() -> dict:
+    return (_load("aliases.yaml").get("aliases") or {})
+
+
 def reload_config() -> None:
     sources_config.cache_clear()
     errno_config.cache_clear()
     pan_errno_config.cache_clear()
+    alias_config.cache_clear()
 
 
 def source_cfg(name: str) -> dict:

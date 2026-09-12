@@ -48,6 +48,46 @@ sources:
     channels_file: null       # 默认 config/tg_channels.txt
     index_path: null          # 默认 .cache/tg_index.sqlite3
 
+  # ---- 垂直资源站（音乐制作插件 / 软件类资源）----
+  # 影视剧的网盘链接直接贴在 TG 里，但 VST/音源/桌面软件不是 ——
+  # 实测 Serum / Omnisphere / 大气合成器 在 21 万条 TG 索引里是 0 条，
+  # PanSou 的 65 个插件也几乎不覆盖。这个垂直领域的资源发布在专业资源站上，
+  # 且下载入口在**详情页**里（搜索页只有标题链接），所以要两阶段跟进。
+  sitesearch:
+    enabled: true
+    kind: forum
+    weight: 0.75
+    deadline: 20
+    concurrency: 4          # 同时打几个站
+    max_pages: 4            # 每个站最多跟进几个详情页（再多收益很小）
+    page_timeout: 12
+    page_concurrency: 10
+    # result_re 用来从搜索结果页挑详情页；单引号里 '' 表示一个 '
+    sites:
+      - name: audioz
+        search: "https://audioz.download/?s={q}"
+        # 真帖子形如 /software/300623-download_native-instruments-kontakt-8....html
+        # 别写成 /\d{4}/\d{2}/ —— 那会匹配到归档日期页（/2026/09/01/）
+        result_re: 'https://audioz\.download/[a-z]+/\d+-download_[^"''<>\s]+\.html'
+      - name: looptorrent
+        search: "https://looptorrent.net/?s={q}"
+        result_re: 'https://looptorrent\.net/[a-z0-9][a-z0-9-]{6,}/'
+      - name: 4download
+        search: "https://4download.net/?s={q}"
+        result_re: 'https://4download\.net/[a-z0-9-]{6,}/'
+      - name: vstorrent
+        search: "https://vstorrent.org/?s={q}"
+        result_re: 'https://vstorrent\.org/[a-z0-9-]{6,}/'
+      - name: ghxi
+        search: "https://www.ghxi.com/?s={q}"
+        result_re: 'https://www\.ghxi\.com/[a-z0-9-]+\.html'
+      - name: 423down
+        search: "https://www.423down.com/?s={q}"
+        result_re: 'https://www\.423down\.com/\d+\.html'
+      - name: dayanzai
+        search: "https://www.dayanzai.me/?s={q}"
+        result_re: 'https://www\.dayanzai\.me/[a-z0-9-]+\.html'
+
   # ---- B 环：搜索引擎定向检索（捞聚合站搜不到的"野链接"）----
   # 两阶段：先搜到"资源讨论页"，再抓这些页面抽网盘链接。
   # 实测：绝大多数引擎不索引 pan.baidu.com/s 本身，但索引讨论页 → 必须两阶段。

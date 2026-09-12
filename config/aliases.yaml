@@ -1,0 +1,44 @@
+# 中文别名 → 实际检索词
+#
+# 为什么要这个：中文用户搜的是社区里的俗称（「大气合成器」「血清」「康泰克」），
+# 但资源站/聚合引擎里只有英文名。实测「大气合成器」原始命中 0 条，
+# 而同一件事搜 "Omnisphere" 能出 20+ 条。
+#
+# 用法：搜到别名时，除了原词还会用这里的英文名去检索；命中的结果按
+# **实际命中的那个词**做相关性打分，所以不会被判成"不相关"。
+#
+# 原则：**只收录有把握的别名**。错的别名会把不相关结果拉进来，比没有更糟。
+# 格式：  "用户可能输入的词": ["实际去检索的词", ...]
+
+aliases:
+  # ---- 合成器 ----
+  "大气合成器": ["Omnisphere"]
+  "omnisphere": ["Omnisphere"]
+  "血清": ["Serum"]
+  "血清合成器": ["Serum"]
+  "xfer serum": ["Serum"]
+  "康泰克": ["Kontakt"]
+  "巨兽": ["Massive"]
+  "巨兽x": ["Massive X"]
+  "肥波": ["FabFilter"]
+  "蜂鸟合成器": ["Vital"]
+  "相位工厂": ["Phase Plant"]
+
+  # ---- 宿主 / DAW ----
+  "水果": ["FL Studio"]
+  "水果studio": ["FL Studio"]
+  "酷贝斯": ["Cubase"]
+  "裤贝斯": ["Cubase"]
+  "逻辑": ["Logic Pro"]
+  "录音室one": ["Studio One"]
+
+  # ---- 音源 / 采样 ----
+  "斯坦伯格": ["Steinberg"]
+  "维也纳": ["Vienna Symphonic Library"]
+  "喷火": ["Spitfire Audio"]
+  "音色库": ["Kontakt Library"]
+
+  # ---- 效果器 ----
+  "臭氧": ["iZotope Ozone"]
+  "瓦尔哈拉": ["Valhalla"]
+  "波浪": ["Waves"]

@@ -92,6 +92,7 @@ class RawHit(BaseModel):
     shared_at: datetime | None = None
     origin: str | None = None       # 来源页面（可点回原帖）
     relaxed: bool = False           # 是否来自"放宽查询"补搜（用于降权，避免淹没主查询结果）
+    query: str | None = None        # 由哪个查询词命中（别名/补搜时用于正确打分）
 
 
 class VerifyResult(BaseModel):
@@ -125,6 +126,8 @@ class Resource(BaseModel):
     hit_count: int = 1
     # 是否由"主查询"命中（False = 只被放宽查询命中）；用于降权，避免补搜结果淹没主结果
     from_primary: bool = True
+    # 命中过这条资源的所有查询词（含别名/补搜），相关性取其中最高的一个
+    queries: list[str] = Field(default_factory=list)
     verify: VerifyResult | None = None
     score: float = 0.0
 

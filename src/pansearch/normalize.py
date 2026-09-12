@@ -83,6 +83,14 @@ URL_RE = re.compile(
     r"https?://[^\s\"'<>()（）【】「」『』《》，,、。；;：:！!？?\]\[{}|\\^`"
     r"\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef]+"
 )
+
+# 磁力链接：它没有 http(s):// 前缀，URL_RE 匹配不到 ——
+# 所以之前所有磁力都只来自 PanSou 的 JSON，从页面/消息正文里一个都抽不出来。
+# VST 音源、软件、影视的分享大量走磁力，必须单独抽。
+MAGNET_RE = re.compile(
+    r"magnet:\?xt=urn:btih:[A-Za-z0-9]{32,40}(?:&[^\s\"'<>()（）【】「」『』《》，,、。；;\]\[]+)*",
+    re.I,
+)
 BAIDU_SURL_RE = re.compile(r"pan\.baidu\.com/s/([A-Za-z0-9_-]+)", re.I)
 BAIDU_SURL_ENCODED_RE = re.compile(r"pan\.baidu\.com(?:%2F|/)s(?:%2F|/)([A-Za-z0-9_-]+)", re.I)
 

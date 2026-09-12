@@ -10,9 +10,10 @@ import httpx
 
 from .adapters import REGISTRY
 from .adapters import pansou as _pansou  # noqa: F401  触发注册
+from .adapters import sitesearch as _sitesearch  # noqa: F401  触发注册
 from .adapters import telegram as _telegram  # noqa: F401  触发注册
 from .adapters import websearch as _websearch  # noqa: F401  触发注册
-from .config import sources_config, verify_cfg
+from .config import alias_config, sources_config, verify_cfg
 from .dedupe import build_resources
 from .models import PanType, RawHit, Resource, Status, VerifyResult
 from .score import score_all, sort_resources
@@ -101,6 +102,29 @@ def build_adapters(names: list[str] | None = None):
     return adapters
 
 
+def alias_queries(kw: str) -> list[str]:
+    """把查询里的中文俗称替换成实际检索词。
+
+    实测「大气合成器」原始命中 0 条，而同一件事搜 "Omnisphere" 能出 20+ 条 ——
+    资源站和聚合引擎里只有英文名，中文用户搜的是社区俗称。
+    这类替换**不降权**（它是等价替换，不是放宽），命中结果按替换后的词打分。
+    """
+    aliases = alias_config()
+    if not aliases:
+        return []
+    low = kw.strip().lower()
+    out: list[str] = []
+    for alias, targets in aliases.items():
+        a = str(alias).strip().lower()
+        if not a or a not in low:
+            continue
+        for target in targets or []:
+            replaced = low.replace(a, str(target).strip().lower())
+            if replaced and replaced != low:
+                out.append(replaced)
+    return list(dict.fromkeys(out))
+
+
 async def _fetch_hits(
     adapters, client: httpx.AsyncClient, query: str, *, deadline: float | None = None
 ) -> tuple[list[RawHit], dict[str, str]]:
@@ -162,26 +186,31 @@ async def search(
         http2=True,
         headers={"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"},
     ) as client:
-        # 主查询与"放宽查询"并行发出：省掉一轮串行等待
-        queries = [kw] + (relaxed_queries(kw) if relax else [])
+        # 主查询 / 补搜 / 别名替换 一起并行发出：
+        #   补搜（relaxed=True）要降权 —— 它是放宽，召回多但精准度低
+        #   别名（relaxed=False）不降权 —— 它是等价替换，命中结果按替换后的词打分
+        plan: list[tuple[str, bool]] = [(kw, False)]
+        if relax:
+            plan += [(q, True) for q in relaxed_queries(kw)]
+            plan += [(q, False) for q in alias_queries(kw)]
         batches = await asyncio.gather(
-            *(_fetch_hits(adapters, client, q) for q in queries),
+            *(_fetch_hits(adapters, client, q) for q, _ in plan),
             return_exceptions=True,
         )
 
         hits: list[RawHit] = []
-        for query, batch in zip(queries, batches):
+        for (query, is_relaxed), batch in zip(plan, batches):
             if isinstance(batch, BaseException):
                 outcome.errors.setdefault("_", f"{type(batch).__name__}: {batch}")
                 continue
             got, errs = batch
             for name, err in errs.items():
                 outcome.errors.setdefault(name, err)
-            if query != kw:
-                for hit in got:
-                    hit.relaxed = True
-                if got:
-                    outcome.queries_used.append(query)
+            for hit in got:
+                hit.relaxed = is_relaxed
+                hit.query = query
+            if query != kw and got:
+                outcome.queries_used.append(query)
             hits.extend(got)
 
         outcome.raw_hits = len(hits)

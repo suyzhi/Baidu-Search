@@ -127,3 +127,28 @@ def test_excerpt_handles_empty_inputs():
     assert excerpt(None, "沙丘") == ""
     assert excerpt("", "沙丘") == ""
     assert excerpt("x", None) == "x"
+
+
+# ---------------------------------------------------------------- 磁力抽取
+def test_extracts_magnet_links():
+    """回归：URL_RE 只匹配 http(s)，磁力链接一个都抽不出来。
+
+    VST 音源 / 软件 / 影视的分享大量走磁力，之前所有磁力都只来自 PanSou 的 JSON。
+    """
+    t = "资源 magnet:?xt=urn:btih:0F0F45F06F13C55DF3384E4253FA6F69E99B73DF&dn=serum 完"
+    hits = _hits(t)
+    assert len(hits) == 1
+    assert hits[0].url.startswith("magnet:?xt=urn:btih:0F0F45F06F13C55DF3384E4253FA6F69E99B73DF")
+
+
+def test_magnet_and_netdisk_in_same_text():
+    t = ("磁力：magnet:?xt=urn:btih:0F0F45F06F13C55DF3384E4253FA6F69E99B73DF "
+         "网盘：https://pan.quark.cn/s/251cd20497e6 提取码 8x2k")
+    got = {h.url.split(":")[0]: h.pwd for h in _hits(t)}
+    assert got["magnet"] is None
+    assert got["https"] == "8x2k"
+
+
+def test_bare_infohash_is_not_a_link():
+    """裸的 40 位 hash 不算链接，别误收。"""
+    assert _hits("哈希 0F0F45F06F13C55DF3384E4253FA6F69E99B73DF 单独出现") == []

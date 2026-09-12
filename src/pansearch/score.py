@@ -31,7 +31,7 @@ def _matched_terms(title: str, terms: list[str]) -> int:
     return matched
 
 
-def _relevance(res: Resource, kw: str) -> float:
+def _relevance_single(res: Resource, kw: str) -> float:
     """多词查询按「命中词数比例」打分，并**特殊对待第一个词**。
 
     中文没有分词，所以 "沙丘 4K HDR" 要拆成词分别匹配。
@@ -64,6 +64,17 @@ def _relevance(res: Resource, kw: str) -> float:
         return 0.2
     # 主题词在，但缺少限定词（4K/HDR/续集编号等）
     return round(0.45 + 0.55 * (matched / len(terms)), 4)
+
+
+def _relevance(res: Resource, kw: str) -> float:
+    """相关性取"原词 / 别名 / 补搜词"里最高的那个。
+
+    否则别名检索会自相矛盾：用户搜「大气合成器」，我们用别名 "Omnisphere"
+    取回一堆标题写着 Omnisphere 的结果，再用「大气合成器」去算相关性
+    —— 主题词一个都不出现，全被判成 0.1 分。
+    """
+    candidates = [kw] + [q for q in (res.queries or []) if q and q != kw]
+    return max(_relevance_single(res, q) for q in candidates)
 
 
 def _kind_weight(res: Resource, cfg: dict) -> float:

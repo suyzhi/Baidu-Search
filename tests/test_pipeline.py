@@ -205,3 +205,59 @@ async def test_relax_disabled_uses_single_query(monkeypatch):
     out = await search("沙丘 4K HDR", do_verify=True, alive_only=False, relax=False, verify_budget=0)
     assert adapter.calls == ["沙丘 4K HDR"]
     assert out.queries_used == ["沙丘 4K HDR"]
+
+
+# ---------------------------------------------------------------- 中文别名
+def test_alias_queries_expands_chinese_nicknames():
+    """回归：实测「大气合成器」原始命中 0 条，而同义的 "Omnisphere" 有 20+ 条。"""
+    from pansearch.pipeline import alias_queries
+
+    assert alias_queries("大气合成器") == ["omnisphere"]
+    assert alias_queries("血清") == ["serum"]
+    assert alias_queries("康泰克") == ["kontakt"]
+
+
+def test_alias_queries_keeps_qualifiers():
+    from pansearch.pipeline import alias_queries
+
+    assert alias_queries("大气合成器 4K") == ["omnisphere 4k"]
+
+
+def test_alias_queries_noop_for_unknown_and_english():
+    from pansearch.pipeline import alias_queries
+
+    assert alias_queries("Serum") == []
+    assert alias_queries("完全没收录的词") == []
+    assert alias_queries("") == []
+
+
+async def test_alias_hits_are_not_downweighted(monkeypatch):
+    """别名是等价替换，不是放宽 —— 命中结果不该被 relaxed_penalty 降权。"""
+    adapter = StubAdapter({}, _quark_hits(2, prefix="Omnisphere"))
+    monkeypatch.setattr(pipeline, "build_adapters", lambda names=None: [adapter])
+    monkeypatch.setattr(pipeline, "VerifierPool", StubPool)
+
+    out = await search("大气合成器", do_verify=True, alive_only=False,
+                       relax=True, verify_budget=0)
+    assert "omnisphere" in adapter.calls
+    assert all(r.from_primary for r in out.resources), "别名命中不该被当成补搜降权"
+
+
+async def test_alias_hits_scored_against_alias_word(monkeypatch):
+    """否则会自相矛盾：用别名取回一堆 "Omnisphere" 结果，再用「大气合成器」算相关性 -> 全 0.1 分。"""
+    from pansearch.score import score_resource
+    from pansearch.config import scoring_cfg
+    from pansearch.models import RawHit
+
+    adapter = StubAdapter({}, [
+        RawHit(source="s", kind="pansou", url="https://pan.quark.cn/s/omnisphere01",
+               title="Omnisphere 2 Factory Library", query="omnisphere"),
+    ])
+    monkeypatch.setattr(pipeline, "build_adapters", lambda names=None: [adapter])
+    monkeypatch.setattr(pipeline, "VerifierPool", StubPool)
+
+    out = await search("大气合成器", do_verify=True, alive_only=False,
+                       relax=True, verify_budget=0)
+    res = out.resources[0]
+    assert res.queries == ["omnisphere"]
+    assert score_resource(res, "大气合成器", scoring_cfg()) > 0.5

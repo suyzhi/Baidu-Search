@@ -9,6 +9,7 @@ from datetime import datetime
 from .models import PanType, RawHit
 from .normalize import (
     BARE_PWD_RE,
+    MAGNET_RE,
     PWD_RE,
     URL_RE,
     detect_pan_type,
@@ -110,37 +111,43 @@ def extract_from_text(
 
     # ---- 第 1 遍：找链接 ----
     links: list[dict] = []
-    for m in URL_RE.finditer(text):
-        raw_url = m.group(0).rstrip("。，、；;!！?？'\"")
-        url = html_mod.unescape(raw_url)
+    spans: list[tuple[int, int]] = []
 
+    def add_link(start: int, end: int, url: str) -> None:
         pan_type = detect_pan_type(url)
         if pan_type is PanType.OTHER:
-            continue
+            return
         if "/share/init" in url and "surl=" not in url:
-            continue
-
-        surl: str | None = None
+            return
         if pan_type is PanType.BAIDU:
             surl, _ = parse_baidu(url)
             if not surl:
                 # 解析不出 surl 的百度链接（如 share/link?shareid=）无法验活也无法去重
-                continue
-
+                return
         links.append(
             {
-                "start": m.start(),
-                "end": m.end(),
+                "start": start,
+                "end": end,
                 "url": url,
                 "pan_type": pan_type,
                 "pwd": pwd_from_url(url),
             }
         )
+        spans.append((start, end))
+
+    # http(s) 链接
+    for m in URL_RE.finditer(text):
+        add_link(m.start(), m.end(), html_mod.unescape(m.group(0).rstrip("。，、；;!！?？'\"")))
+
+    # 磁力链接（VST 音源 / 软件 / 影视大量走磁力，且它没有 http:// 前缀）
+    for m in MAGNET_RE.finditer(text):
+        add_link(m.start(), m.end(), html_mod.unescape(m.group(0)))
 
     if not links:
         return []
 
-    occupied = [(lk["start"], lk["end"]) for lk in links]
+    links.sort(key=lambda lk: lk["start"])
+    occupied = spans          # 链接占用的区间（提取码落在其中 = URL 自带的，跳过）
 
     def inside_link(pos: int) -> bool:
         return any(s <= pos < e for s, e in occupied)
