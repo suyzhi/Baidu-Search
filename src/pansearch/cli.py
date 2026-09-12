@@ -573,6 +573,87 @@ def sites_coverage() -> None:
     console.print("[dim]注：TG 频道只有采收来的那部分带垂直标注，其余按影视/通用计。[/dim]")
 
 
+channels_app = typer.Typer(help="TG 频道采收：从导航站找候选 → 价值校验 → 追加进清单")
+app.add_typer(channels_app, name="channels")
+
+
+@channels_app.command("harvest")
+def channels_harvest(
+    source: str = typer.Option("tgnav", "--source", "-s", help="tgnav（导航站分类）或 file（本地候选文件）"),
+    cand_file: Optional[str] = typer.Option(None, "--file", "-f", help="--source file 时的候选清单路径"),
+    min_links: int = typer.Option(1, "--min-links", help="最近一页至少要有几条资源链接"),
+    concurrency: int = typer.Option(24, "--concurrency", "-c"),
+    save: bool = typer.Option(True, "--save/--no-save"),
+) -> None:
+    """采收 TG 频道：只有最近一页真含网盘/磁力链接的才收。
+
+    和站点探测器的价值校验同一套判据 —— 候选里绝大多数是机器人、交易所、
+    新闻、表情包频道，不校验就全爬一遍是纯浪费。
+    """
+    import asyncio as _asyncio
+
+    import httpx as _httpx
+
+    from .channelharvest import (
+        UA, append_channels, harvest_tgnav, load_candidate_file, verify_many,
+    )
+
+    async def _run() -> None:
+        async with _httpx.AsyncClient(
+            follow_redirects=True, http2=True, timeout=20,
+            headers={"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"},
+        ) as client:
+            if source == "file":
+                if not cand_file:
+                    console.print("[red]--source file 需要同时给 --file[/red]")
+                    raise typer.Exit(1)
+                cands = load_candidate_file(cand_file)
+            else:
+                by_v = await harvest_tgnav(client)
+                cands = [c for chans in by_v.values() for c in chans]
+                console.print(f"[dim]tgnav 采收 {len(cands)} 个候选："
+                              f"{ {k: len(v) for k, v in by_v.items()} }[/dim]")
+
+            console.print(f"[cyan]对 {len(cands)} 个候选做价值校验（并发 {concurrency}）…[/cyan]")
+
+            def show(hit) -> None:
+                console.print(f"  [green]✓[/green] {hit.channel:<32} 链接={hit.links:<4} {hit.vertical}")
+
+            result = await verify_many(cands, concurrency=concurrency,
+                                       min_links=min_links, on_hit=show)
+            console.print(f"\n检查 [bold]{result.checked}[/bold] 个，收下 "
+                          f"[bold green]{len(result.kept)}[/bold green] 个")
+            console.print(f"按垂直领域：{result.by_vertical}")
+            if save and result.kept:
+                path = append_channels(result.kept)
+                console.print(f"[green]已追加到 {path}[/green]；"
+                              f"接着跑 pansearch index crawl --pages 3 入库")
+
+    _asyncio.run(_run())
+
+
+@channels_app.command("stats")
+def channels_stats() -> None:
+    """频道清单与索引的概况。"""
+    from .routing import VERTICAL_KEYWORDS
+    from .tgindex import TgIndex, load_channels
+
+    channels = load_channels()
+    index = TgIndex()
+    try:
+        info = index.stats()
+    finally:
+        index.close()
+    console.print(
+        f"频道清单 [bold]{len(channels)}[/bold] 个 ｜ "
+        f"已索引消息 [bold]{info['messages']}[/bold] 条"
+        f"（{info['messages_with_links']} 条含链接）｜ "
+        f"有数据的频道 {info['channels_indexed']}"
+    )
+    console.print(f"[dim]垂直领域标签共 {len(VERTICAL_KEYWORDS)} 种；"
+                  f"用 pansearch sites coverage 看逐领域的覆盖情况[/dim]")
+
+
 @app.command()
 def web(
     host: str = typer.Option("127.0.0.1", help="监听地址"),
