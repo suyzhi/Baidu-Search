@@ -316,3 +316,35 @@ def test_maccms_pattern_is_available():
 
     assert any("vodsearch" in p for p in SEARCH_PATTERNS)
     assert any("vod/search" in p for p in SEARCH_PATTERNS)
+
+
+async def test_measure_yield_unescapes_base_for_relative_hrefs():
+    """回归：base 是从正则里抠出来的，带着 re.escape 留下的反斜杠
+    （https://share\\.dmhy\\.org）。直接拿去 urljoin 会拼出畸形 URL，
+    所有请求失败、产出恒为 0 —— 这静默地误杀了**所有使用相对 href 的站**。
+    """
+    from pansearch.sitecatalog import _measure_link_yield
+
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if "/view/" in str(request.url):
+            return httpx.Response(200, text=(
+                '<html><head><title>资源</title></head><body>'
+                '<a href="https://pan.quark.cn/s/abc123">夸克</a>'
+                '<p>magnet:?xt=urn:btih:0F0F45F06F13C55DF3384E4253FA6F69E99B73DF</p>'
+                '</body></html>'))
+        return httpx.Response(404)
+
+    # 搜索页用**相对** href（dmhy 就是这样）
+    search_html = ('<a href="/topics/view/725310_Some_Title_2025_11_12.html">1</a>'
+                   '<a href="/topics/view/725311_Another_Title_2025_11_13.html">2</a>')
+    result_re = r"https://share\.dmhy\.org/[a-z0-9_-]+/[a-z0-9_-]+/\d+_[a-z0-9_-]+\.html"
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        yield_ = await _measure_link_yield(client, result_re, search_html, sample=2)
+
+    assert yield_ > 0, "相对 href + 转义过的 base 必须也能抓到详情页"
+    assert all("\\" not in u for u in seen), f"请求 URL 里不该有反斜杠: {seen[:2]}"
+    assert all(u.startswith("https://share.dmhy.org/") for u in seen), seen[:2]

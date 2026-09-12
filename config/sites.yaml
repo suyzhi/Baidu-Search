@@ -7,7 +7,7 @@ sites:
   - audio-tool
   - music
   search: https://looptorrent.net/?s={q}
-  result_re: https://looptorrent\.net/[a-z0-9-]+/
+  result_re: https://looptorrent\.net/[a-z0-9_-]+/
   verified: true
   note: probe /?s={q} yield=9
 - name: plugintorrent
@@ -15,7 +15,7 @@ sites:
   verticals:
   - audio-tool
   search: https://plugintorrent.com/?s={q}
-  result_re: https://plugintorrent\.com/[a-z0-9-]+/
+  result_re: https://plugintorrent\.com/[a-z0-9_-]+/
   verified: true
   note: probe /?s={q} yield=30
 - name: vstorrent
@@ -24,9 +24,25 @@ sites:
   - audio-tool
   - music
   search: https://vstorrent.org/?s={q}
-  result_re: https://vstorrent\.org/[a-z0-9-]+/
+  result_re: https://vstorrent\.org/[a-z0-9_-]+/
   verified: true
   note: probe /?s={q} yield=30
+- name: runoob
+  domain: www.runoob.com
+  verticals:
+  - course
+  search: https://www.runoob.com/?s={q}
+  result_re: https://www\.runoob\.com//[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+/
+  verified: true
+  note: probe /?s={q} yield=4
+- name: gamer520
+  domain: www.gamer520.com
+  verticals:
+  - game
+  search: https://www.gamer520.com/?s={q}
+  result_re: https://www\.gamer520\.com/\d+\.html
+  verified: true
+  note: probe /?s={q} yield=62
 - name: 423down
   domain: www.423down.com
   verticals:
@@ -34,13 +50,13 @@ sites:
   search: https://www.423down.com/?s={q}
   result_re: https://www\.423down\.com/\d+\.html
   verified: true
-  note: probe /?s={q} yield=18
+  note: probe /?s={q} yield=12
 - name: dayanzai
   domain: www.dayanzai.me
   verticals:
   - software
   search: https://www.dayanzai.me/?s={q}
-  result_re: https://www\.dayanzai\.me/[a-z0-9-]+\.html
+  result_re: https://www\.dayanzai\.me/[a-z0-9_-]+\.html
   verified: true
   note: probe /?s={q} yield=4
 - name: ghxi
@@ -48,9 +64,9 @@ sites:
   verticals:
   - software
   search: https://www.ghxi.com/?s={q}
-  result_re: https://www\.ghxi\.com/[a-z0-9-]+\.html
+  result_re: https://www\.ghxi\.com/[a-z0-9_-]+\.html
   verified: true
-  note: probe /?s={q} yield=11
+  note: probe /?s={q} yield=8
 - name: puresys
   domain: www.puresys.net
   verticals:
@@ -58,7 +74,7 @@ sites:
   search: https://www.puresys.net/?s={q}
   result_re: https://www\.puresys\.net/\d+\.html
   verified: true
-  note: probe /?s={q} yield=4
+  note: probe /?s={q} yield=2
 - name: ypojie
   domain: www.ypojie.com
   verticals:
@@ -66,4 +82,4 @@ sites:
   search: https://www.ypojie.com/so/{q}
   result_re: https://www\.ypojie\.com/\d+\.html
   verified: true
-  note: probe /so/{q} yield=7
+  note: probe /so/{q} yield=6

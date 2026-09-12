@@ -161,6 +161,9 @@ def _path_shape(path: str) -> str | None:
     tmp = re.sub(r"\d+", _PH_DIGIT, tmp)
     if _PH_DIGIT not in tmp and _PH_WORD not in tmp:
         return None
+    # 带 % 的是 URL 编码残留（dmhy 的搜索参数会漏进路径），不是可用模式
+    if "%" in tmp:
+        return None
 
     out: list[str] = []
     for ch in tmp:
@@ -175,13 +178,32 @@ def _path_shape(path: str) -> str | None:
     return "".join(out) + ext
 
 
-def derive_result_candidates(html: str, base: str, top: int = 3) -> list[str]:
-    """返回按出现次数排序的**多个**详情页正则候选。
+def _detail_likeness(shape: str) -> int:
+    """给形状打个"像不像内容详情页"的分。
 
-    为什么要多个：页面上"最常见的形状"未必是详情页。实测 dmhy 的搜索页里
-    分类列表链接（/topics/list/sort_id/2）比真正的详情页
-    （/topics/view/xxxx_title.html）更多，只取最常见的那一个就会指向列表页，
-    于是被判成"没有网盘链接"。多个候选各自试一下产出，取最高的那个。
+    只按出现次数排序是不够的：搜索词命中少时，页面会被导航/分类链接主导。
+    实测 dmhy 搜"微信"只有 5 条结果，最常见形状是分类列表
+    （/topics/list/sort_id/2），真正的详情页
+    （/topics/view/725310_Fushigi_Yugi_TV_OVA_2025_11_12.html）排不进前二 ——
+    于是被判成"没有网盘链接"。
+    """
+    score = 0
+    if ".html" in shape or ".htm" in shape or ".php" in shape:
+        score += 3          # 详情页常带文件后缀
+    if "_" in shape:
+        score += 2          # 详情页 slug 常有下划线（dmhy 就是）
+    if r"\d" in shape:
+        score += 1          # 通常带 ID
+    if shape.count("/") >= 4:
+        score += 1          # 层级更深，更像具体条目
+    return score
+
+
+def derive_result_candidates(html: str, base: str, top: int = 3) -> list[str]:
+    """返回**多个**详情页正则候选，按"像不像详情页"再按出现次数排序。
+
+    为什么要多个：页面上"最常见的形状"未必是详情页，多个候选各自试一下
+    产出，取最高的那个，比赌一个稳得多。
     """
     shapes: dict[str, int] = {}
     for path in _DETAIL_RE.findall(html):
@@ -189,7 +211,10 @@ def derive_result_candidates(html: str, base: str, top: int = 3) -> list[str]:
         if shape:
             shapes[shape] = shapes.get(shape, 0) + 1
     host = re.escape(base.replace("https://", "").replace("http://", "").rstrip("/"))
-    ranked = sorted(shapes.items(), key=lambda kv: (-kv[1], kv[0]))
+    ranked = sorted(
+        shapes.items(),
+        key=lambda kv: (-_detail_likeness(kv[0]), -kv[1], kv[0]),
+    )
     return [f"https://{host}{shape}" for shape, _ in ranked[:top]]
 
 
@@ -380,7 +405,7 @@ async def probe_domain(
             # gain 本来就是 0 已经被挡住；而与首页比长度/比条目数都太脆 ——
             # 实测 looptorrent 首页与搜索页的详情链接数恰好相同，就被误杀了。
             if gain >= min_gain:
-                shapes = derive_result_candidates(real.text, base, top=2)
+                shapes = derive_result_candidates(real.text, base, top=3)
                 if not shapes:
                     continue
                 saw_pattern = True
@@ -464,9 +489,12 @@ def extract_detail_urls(html: str, result_re: str, base: str = "") -> list[str]:
 async def _measure_link_yield(client: httpx.AsyncClient, result_re: str,
                               search_html: str, *, sample: int = 4) -> int:
     """跟进最多 sample 个详情页，统计里面的网盘/磁力链接数。"""
-    # 从正则在正文中的位置推不出 base，所以直接用 URL 里的 host
+    # base 要从正则里推，但**必须去掉 re.escape 留下的反斜杠**：
+    # 正则是 "https://share\.dmhy\.org/..."，直接拿 "share\.dmhy\.org" 去
+    # urljoin 会拼出畸形 URL（反斜杠不是合法主机名），所有请求都失败、
+    # 产出恒为 0 —— 实测这让所有用相对 href 的站被误判成"不分享网盘"。
     m = re.match(r"(https?://[^/]+)", result_re)
-    base = m.group(1) if m else ""
+    base = m.group(1).replace("\\", "") if m else ""
     urls = extract_detail_urls(search_html, result_re, base)[:sample]
     total = 0
     for url in urls:
