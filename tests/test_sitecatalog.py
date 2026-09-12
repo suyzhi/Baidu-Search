@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from pansearch.routing import GENERAL_VERTICAL, VERTICAL_KEYWORDS, classify
@@ -199,3 +200,86 @@ def test_select_sites_skips_unverified(monkeypatch):
     monkeypatch.setattr(mod, "load_catalog", lambda *a, **k: catalog)
     adapter = mod.SiteSearchAdapter({"health_tracking": False})
     assert adapter.select_sites("随便") == []
+
+
+# ---------------------------------------------------------------- 价值校验
+def test_count_share_links_finds_netdisk_and_magnet():
+    from pansearch.sitecatalog import count_share_links
+
+    html = ('<a href="https://pan.quark.cn/s/abc123">夸克</a>'
+            '<a href="https://pan.baidu.com/s/1AbCdEfGhIjKlMnOp">百度</a>'
+            '<p>magnet:?xt=urn:btih:0F0F45F06F13C55DF3384E4253FA6F69E99B73DF</p>')
+    assert count_share_links(html) == 3
+
+
+def test_count_share_links_zero_for_streaming_site():
+    """回归：ikanbot/rytv 是在线播放站、assrt 是字幕站 —— 搜索完全正常，
+    但详情页里没有网盘链接，收进目录纯属占位浪费请求。"""
+    from pansearch.sitecatalog import count_share_links
+
+    assert count_share_links('<a href="/play/12345.html">在线观看</a>') == 0
+    assert count_share_links('<a href="https://example.com/download.zip">下载字幕</a>') == 0
+
+
+def test_count_share_links_ignores_plain_http():
+    from pansearch.sitecatalog import count_share_links
+
+    assert count_share_links('<a href="https://www.google.com">x</a>') == 0
+
+
+async def test_probe_rejects_site_without_share_links():
+    """搜得出结果但详情页没网盘链接的站，必须被判为不可用。"""
+    from pansearch import sitecatalog as sc
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "?s=" in url or "search" in url:
+            return httpx.Response(200, text=(
+                '<html><head><title>search</title></head><body>'
+                '<a href="/play/video-aaa-bbb/">1</a>'
+                '<a href="/play/video-ccc-ddd/">2</a>'
+                '<a href="/play/video-eee-fff/">3</a>'
+                '<a href="/play/video-ggg-hhh/">4</a>'
+                '</body></html>'))
+        # 详情页：只有在线播放，没有网盘
+        return httpx.Response(200, text="<html><head><title>剧集</title></head>"
+                                        "<body><a href='/play/x'>在线观看</a></body></html>")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await sc.probe_domain(client, "stream.example", terms=["剧集"])
+    assert result.ok is False
+
+
+async def test_probe_accepts_site_with_share_links():
+    from pansearch import sitecatalog as sc
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "page-" in url:                     # 详情页：含网盘链接
+            return httpx.Response(200, text=(
+                '<html><head><title>资源 剧集</title></head><body>'
+                '<a href="https://pan.quark.cn/s/abc123">夸克</a>'
+                '<a href="https://pan.baidu.com/s/1AbCdEfGhIjKlMnOp">百度</a>'
+                '</body></html>'))
+        # 只有"真词"能搜出结果；无意义串返回空列表（对照法要求）
+        if "%E5%89%A7%E9%9B%86" in url or "剧集" in url:
+            return httpx.Response(200, text=(
+                '<html><head><title>search 剧集</title></head><body>'
+                '<a href="/page-aaa/">1</a><a href="/page-bbb/">2</a>'
+                '<a href="/page-ccc/">3</a><a href="/page-ddd/">4</a>'
+                '</body></html>'))
+        return httpx.Response(200, text='<html><head><title>空</title></head><body></body></html>')
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await sc.probe_domain(client, "res.example", terms=["剧集"])
+    assert result.ok is True
+    assert result.link_yield > 0
+    assert result.result_re
+
+
+def test_maccms_pattern_is_available():
+    """MacCMS/苹果CMS 是中文影视站的事实标准，缺了它影视类会全军覆没。"""
+    from pansearch.sitecatalog import SEARCH_PATTERNS
+
+    assert any("vodsearch" in p for p in SEARCH_PATTERNS)
+    assert any("vod/search" in p for p in SEARCH_PATTERNS)

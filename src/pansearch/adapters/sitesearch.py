@@ -26,7 +26,7 @@ import httpx
 from ..extract import extract_from_text, html_to_text, page_title
 from ..models import RawHit
 from ..routing import GENERAL_VERTICAL, classify
-from ..sitecatalog import SiteEntry, SiteHealth, load_catalog
+from ..sitecatalog import SiteEntry, SiteHealth, extract_detail_urls, load_catalog
 from .base import Adapter, register
 
 UA = (
@@ -181,7 +181,7 @@ class SiteSearchAdapter(Adapter):
 
         # 阶段 1：直接命中（搜索页偶尔就带网盘/磁力链接）+ 挑详情页
         hits = extract_from_text(resp.text, source=f"site:{name}", kind="forum", origin=url)
-        pages = self._pick_pages(resp.text, result_re)
+        pages = self._pick_pages(resp.text, result_re, url)
 
         # 阶段 2：跟进详情页
         if pages:
@@ -258,20 +258,13 @@ class SiteSearchAdapter(Adapter):
         return out
 
     @staticmethod
-    def _pick_pages(html: str, result_re: str) -> list[str]:
-        try:
-            pattern = re.compile(result_re, re.I)
-        except re.error:
-            return []
+    def _pick_pages(html: str, result_re: str, base: str = "") -> list[str]:
         out: list[str] = []
-        for raw in pattern.findall(html):
-            url = raw if isinstance(raw, str) else raw[0]
-            url = url.rstrip("。，、；;!！?？'\"")
+        for url in extract_detail_urls(html, result_re, base):
             low = url.lower()
             if any(part in low for part in _SKIP_PATH_PARTS):
                 continue
             if not urlsplit(url).path.strip("/"):     # 站点根 / 纯路径
                 continue
-            if url not in out:
-                out.append(url)
+            out.append(url)
         return out

@@ -54,10 +54,19 @@ SEARCH_PATTERNS: tuple[str, ...] = (
     # DataLife Engine（audioz / 4download 等一大批资源站用的就是它）
     "/index.php?do=search&subaction=search&story={q}",
     "/?do=search&subaction=search&story={q}",
+    # MacCMS / 苹果 CMS —— 中文影视站的事实标准，之前完全没有，导致影视类全军覆没
+    "/vodsearch/-------------.html?wd={q}",
+    "/index.php/vod/search.html?wd={q}",
+    "/index.php/vod/search/wd/{q}.html",
+    "/vodsearch.html?wd={q}",
+    "/search.php?searchword={q}",
     # 其他常见形态
     "/search.php?q={q}",
     "/find?q={q}",
     "/search?query={q}",
+    "/?search={q}",
+    "/search/{q}.html",
+    "/search/{q}/",
 )
 
 # 探测用的"一定有结果"的高频词，按站点语言/领域分组
@@ -89,7 +98,10 @@ _SKIP_PATH = (
 )
 # 像内容详情页的路径：数字 ID、.html 结尾、常见栏目、或 WP 风格 slug（多段连字符）
 _DETAIL_RE = re.compile(r'href="(?:https?://[^/"]+)?(/[^"#?]{3,})"')
-_SLUG_RE = re.compile(r"^/[a-z0-9]+(?:-[a-z0-9]+){2,}/?$")
+# WordPress 风格 slug，允许一层栏目前缀：
+#   /amazound-ppg-storm-for-kontakt/   （无前缀）
+#   /comic/santi-huanchuangweilai      （/comic 前缀）—— 之前只认单段，漏掉一大批站
+_SLUG_RE = re.compile(r"^/(?:[a-z0-9-]+/)?[a-z0-9]+(?:-[a-z0-9]+){1,}/?$")
 
 
 def count_result_links(html: str) -> int:
@@ -180,6 +192,26 @@ def derive_result_re(html: str, base: str) -> str:
     return f"https://{host}{best}"
 
 
+def count_share_links(html: str) -> int:
+    """数一数页面里有几条**网盘 / 磁力**链接。
+
+    这是探测器的第二道闸门，比"能搜出结果"重要得多：
+    实测 ikanbot / rytv 是在线播放站、assrt 是字幕站 —— 搜索完全正常，
+    但详情页里根本没有网盘链接，收进目录纯属占位浪费请求。
+    """
+    from .normalize import MAGNET_RE, URL_RE
+    from .normalize import detect_pan_type
+
+    found: set[str] = set()
+    for raw in URL_RE.findall(html):
+        url = raw.rstrip("。，、；;!！?？'\"")
+        if detect_pan_type(url).value != "other":
+            found.add(url)
+    for m in MAGNET_RE.findall(html):
+        found.add(m)
+    return len(found)
+
+
 def _garbage(n: int = 10) -> str:
     return "".join(random.choices(string.ascii_lowercase, k=n))
 
@@ -256,6 +288,7 @@ class ProbeResult:
     noise_hits: int = 0
     verticals: list[str] = field(default_factory=list)
     result_re: str = ""
+    link_yield: int = 0          # 详情页里抽到多少条网盘/磁力链接（0 = 这站对我们没用）
     error: str = ""
 
 
@@ -309,12 +342,23 @@ async def probe_domain(
             # 资源站首页本身就列一堆文章，减掉会把 looptorrent/423down 这类误杀。
             # 用"搜索页与首页长度差异"来挡"搜索页=首页"的 JS 站。
             gain = r_hits - n_hits
-            if gain >= min_gain and abs(len(real.text) - len(home.text)) > 200:
+            # 只用对照法判定，不再夹一个"搜索页与首页长度差 > 200"的条件：
+            # JS 站（无视查询参数、永远返回同一页）在对照法下 gain 就是 0，
+            # 已经被挡住了；而长度阈值会误杀结果页很短的站。
+            if gain >= min_gain and r_hits != home_hits:
+                result_re = derive_result_re(real.text, base)
+                if not result_re:
+                    continue
+                # 价值校验：跟进几个详情页，看里面到底有没有网盘/磁力链接。
+                # 没有就说明这站不是我们要的类型（在线播放站、字幕站、教程站…）。
+                yield_ = await _measure_link_yield(client, result_re, real.text)
+                if yield_ <= 0:
+                    continue
                 cand = ProbeResult(
                     domain=host, ok=True,
                     search=base + tpl, template=tpl,
                     real_hits=r_hits, noise_hits=n_hits,
-                    result_re=derive_result_re(real.text, base),
+                    result_re=result_re, link_yield=yield_,
                 )
                 if best is None or cand.real_hits > best.real_hits:
                     best = cand
@@ -327,6 +371,63 @@ async def probe_domain(
 
 def _is_cjk_domain(host: str) -> bool:
     return any(host.endswith(tld) for tld in (".cn", ".com.cn", ".net.cn", ".org.cn", ".cc", ".me", ".top", ".xyz"))
+
+
+def extract_detail_urls(html: str, result_re: str, base: str = "") -> list[str]:
+    """从搜索页里挑出详情页 URL —— **绝对与相对 href 都要认**。
+
+    实测踩过：derive_result_re 产出的正则是 "https://host/xxx" 形式，
+    但很多站的搜索结果页用的是相对 href（href="/comic/xxx"），
+    于是两边都匹配不到，站点被误判为"没有结果"。
+    """
+    from urllib.parse import urljoin
+
+    out: list[str] = []
+    try:
+        pattern = re.compile(result_re, re.I)
+    except re.error:
+        return out
+
+    for raw in pattern.findall(html):
+        url = raw if isinstance(raw, str) else raw[0]
+        url = url.rstrip("。，、；;!！?？'\"")
+        if url and url not in out:
+            out.append(url)
+
+    # 相对形式：把正则的 scheme://host 前缀去掉再匹配一次
+    path_re_src = re.sub(r"^https?://[^/]+", "", result_re)
+    if path_re_src and path_re_src != result_re and base:
+        try:
+            path_re = re.compile(path_re_src, re.I)
+        except re.error:
+            return out
+        for raw in path_re.findall(html):
+            path = raw if isinstance(raw, str) else raw[0]
+            path = path.rstrip("。，、；;!！?？'\"")
+            if not path:
+                continue
+            url = urljoin(base, path)
+            if url not in out:
+                out.append(url)
+    return out
+
+
+async def _measure_link_yield(client: httpx.AsyncClient, result_re: str,
+                              search_html: str, *, sample: int = 3) -> int:
+    """跟进最多 sample 个详情页，统计里面的网盘/磁力链接数。"""
+    # 从正则在正文中的位置推不出 base，所以直接用 URL 里的 host
+    m = re.match(r"(https?://[^/]+)", result_re)
+    base = m.group(1) if m else ""
+    urls = extract_detail_urls(search_html, result_re, base)[:sample]
+    total = 0
+    for url in urls:
+        try:
+            resp = await client.get(url, timeout=15)
+        except Exception:                      # noqa: BLE001
+            continue
+        if resp.status_code == 200:
+            total += count_share_links(resp.text)
+    return total
 
 
 async def probe_many(

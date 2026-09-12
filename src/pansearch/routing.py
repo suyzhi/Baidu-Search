@@ -18,7 +18,7 @@ VERTICAL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "movie": (
         "电影", "影片", "蓝光", "原盘", "remux", "bdrip", "web-dl", "webdl",
         "1080p", "2160p", "4k", "hdr", "杜比", "dolby", "atmos", "美剧", "英剧",
-        "韩剧", "日剧", "剧集", "连续剧", "纪录片", "综艺", "movie", "film",
+        "韩剧", "日剧", "剧集", "连续剧", "电视剧", "纪录片", "综艺", "movie", "film",
     ),
     "anime": (
         "动漫", "番剧", "新番", "漫画", "同人", "ova", "tva", "anime", "manga",

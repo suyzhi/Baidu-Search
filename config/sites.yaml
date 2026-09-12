@@ -53,6 +53,22 @@ sites:
   result_re: https://vstorrent\.org/[a-z0-9-]+/
   verified: true
   note: probe /?s={q}
+- name: 1kkk
+  domain: www.1kkk.com
+  verticals:
+  - comic
+  search: https://www.1kkk.com/search/{q}
+  result_re: https://www\.1kkk\.com/[a-z0-9-]+/
+  verified: true
+  note: probe /search/{q}
+- name: 51cto
+  domain: www.51cto.com
+  verticals:
+  - course
+  search: https://www.51cto.com/search/{q}
+  result_re: https://www\.51cto\.com/[a-z0-9-]+/\d+\.html
+  verified: true
+  note: probe /search/{q}
 - name: bilibili
   domain: www.bilibili.com
   verticals:
@@ -70,6 +86,14 @@ sites:
   result_re: https://www\.csdn\.net/[a-z0-9-]+/[a-z0-9-]+/[a-z0-9-]+/\d+
   verified: true
   note: probe /?keyword={q}
+- name: nowcoder
+  domain: www.nowcoder.com
+  verticals:
+  - course
+  search: https://www.nowcoder.com/?keyword={q}
+  result_re: https://www\.nowcoder\.com/[a-z0-9-]+/\d+
+  verified: true
+  note: probe /?keyword={q}
 - name: runoob
   domain: www.runoob.com
   verticals:
@@ -78,6 +102,14 @@ sites:
   result_re: https://www\.runoob\.com/[a-z0-9-]+/[a-z0-9-]+\.html
   verified: true
   note: probe /?s={q}
+- name: huiyi8
+  domain: www.huiyi8.com
+  verticals:
+  - design
+  search: https://www.huiyi8.com/search/{q}
+  result_re: https://www\.huiyi8\.com/[a-z0-9-]+/\d+\.html
+  verified: true
+  note: probe /search/{q}
 - name: uisdc
   domain: www.uisdc.com
   verticals:
@@ -102,6 +134,33 @@ sites:
   result_re: https://www\.gamer520\.com/\d+\.html
   verified: true
   note: probe /?s={q}
+- name: assrt
+  domain: assrt.net
+  verticals:
+  - movie
+  - tv
+  search: https://assrt.net/search.php?searchword={q}
+  result_re: https://assrt\.net/[a-z0-9-]+/[a-z0-9-]+/\d+/\d+\.[a-z0-9-]+
+  verified: true
+  note: probe /search.php?searchword={q}
+- name: ikanbot
+  domain: www.ikanbot.com
+  verticals:
+  - movie
+  - tv
+  search: https://www.ikanbot.com/search?q={q}
+  result_re: https://www\.ikanbot\.com/[a-z0-9-]+/\d+
+  verified: true
+  note: probe /search?q={q}
+- name: rytv
+  domain: www.rytv.tv
+  verticals:
+  - movie
+  - tv
+  search: https://www.rytv.tv/index.php/vod/search.html?wd={q}
+  result_re: https://www\.rytv\.tv/[a-z0-9-]+\.[a-z0-9-]+/[a-z0-9-]+/[a-z0-9-]+/[a-z0-9-]+/\d+\.html
+  verified: true
+  note: probe /index.php/vod/search.html?wd={q}
 - name: 423down
   domain: www.423down.com
   verticals:
