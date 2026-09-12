@@ -85,8 +85,12 @@ async def ensure_index(pages: int = 1, *, deepen: bool = False,
         channels = load_channels()
         if not channels:
             return {"error": "频道清单为空，请检查 config/tg_channels.txt"}
+        moved = index.normalize_channel_keys(channels)
         crawler = TgCrawler(concurrency=concurrency, index=index)
-        return await crawler.crawl(channels, pages=pages, deepen=deepen)
+        stats = await crawler.crawl(channels, pages=pages, deepen=deepen)
+        if moved:
+            stats["rekeyed"] = moved
+        return stats
     finally:
         index.close()
 

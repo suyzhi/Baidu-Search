@@ -321,6 +321,7 @@ def index_crawl(
     console.print(
         f"[green]完成[/green]：频道 {stats['channels']} 个 ｜ 页面 {stats['pages']} ｜ "
         f"消息 {stats['messages']} 条 ｜ 新增 {stats['new']} 条 ｜ 失败 {stats['errors']} 个"
+        + (f" ｜ 频道名归并 {stats['rekeyed']} 处" if stats.get("rekeyed") else "")
     )
 
 

@@ -71,6 +71,26 @@ def test_parse_empty_page():
     assert parse_channel_page("<html><body>no messages</body></html>", "ch") == []
 
 
+def test_message_channel_uses_requested_name_not_data_post():
+    """回归：data-post 的大小写/别名与配置不一致，照抄会把消息存到别的键下。
+
+    实测 data-post 是 `Baidu_Netdisk`，而配置里写的是 `Baidu_netdisk`，
+    结果该频道在频道表里显示 0 条消息、深度统计也失真。
+    """
+    page = '<div class="tgme_widget_message" data-post="Baidu_Netdisk/777">' \
+           '<div class="tgme_widget_message_text js-message_text">沙丘 4K</div></div>'
+    msgs = parse_channel_page(page, "Baidu_netdisk")
+    assert [m.channel for m in msgs] == ["Baidu_netdisk"]
+
+
+def test_forwarded_message_does_not_hijack_channel_key():
+    """转发消息的 data-post 指向原频道，也不能改归属。"""
+    page = '<div class="tgme_widget_message" data-post="kfcfoodcourt/1">' \
+           '<div class="tgme_widget_message_text js-message_text">三体</div></div>'
+    msgs = parse_channel_page(page, "yunpanx")
+    assert msgs[0].channel == "yunpanx"
+
+
 # ---------------------------------------------------------------- 索引
 def make_index(tmp_path) -> TgIndex:
     return TgIndex(tmp_path / "tg.sqlite3")
@@ -141,6 +161,43 @@ def test_search_empty_index_returns_nothing(tmp_path):
     idx = make_index(tmp_path)
     assert idx.search("沙丘") == []
     assert idx.search("") == []
+    idx.close()
+
+
+def test_normalize_channel_keys_merges_case_mismatch(tmp_path):
+    """历史遗留的大小写不一致键要能被归并到配置里的标准名。"""
+    idx = make_index(tmp_path)
+    idx.upsert([
+        TgMessage(channel="Baidu_Netdisk", msg_id=1, posted_at=None,
+                  text="沙丘", links=[{"url": "https://pan.baidu.com/s/1AAA", "pwd": None}]),
+        TgMessage(channel="dianying4K", msg_id=2, posted_at=None,
+                  text="三体", links=[{"url": "https://pan.baidu.com/s/1BBB", "pwd": None}]),
+    ])
+    idx.mark_channel("Baidu_Netdisk", 1, 1)
+    idx.mark_channel("dianying4K", 2, 2)
+
+    moved = idx.normalize_channel_keys(["Baidu_netdisk", "dianying4k", "other"])
+    assert moved == 4                                   # 两张表各 2 行
+
+    channels = {r[0] for r in idx.conn.execute("SELECT DISTINCT channel FROM tg_messages")}
+    assert channels == {"Baidu_netdisk", "dianying4k"}
+    assert idx.oldest_id("Baidu_netdisk") == 1
+    assert idx.stats()["messages"] == 2
+    idx.close()
+
+
+def test_normalize_channel_keys_handles_pk_collision(tmp_path):
+    """归并时若同一 msg_id 在两个键下都有，不能因主键冲突而失败。"""
+    idx = make_index(tmp_path)
+    idx.upsert([
+        TgMessage(channel="Q_dongman", msg_id=5, posted_at=None, text="旧"),
+        TgMessage(channel="Q_dongman".lower() if False else "q_dongman",
+                  msg_id=5, posted_at=None, text="新"),
+    ])
+    idx.normalize_channel_keys(["Q_dongman"])
+    rows = idx.conn.execute("SELECT channel, text FROM tg_messages").fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == "Q_dongman"
     idx.close()
 
 

@@ -88,7 +88,14 @@ class TgMessage:
 
 
 def parse_channel_page(html: str, channel: str) -> list[TgMessage]:
-    """解析 t.me/s/<channel> 页面里的消息。"""
+    """解析 t.me/s/<channel> 页面里的消息。
+
+    频道名一律用**我们请求的那个**（`channel` 参数），不用 `data-post` 里的：
+      * 页面里的 data-post 大小写/别名可能与配置不一致
+        （实测 data-post 是 `Baidu_Netdisk`，配置写的是 `Baidu_netdisk`），
+        照抄会让消息存到另一个键下、频道统计显示 0 条；
+      * 转发消息的 data-post 指向**原频道**，照抄会把归属搞乱。
+    """
     marks = list(_POST_RE.finditer(html))
     if not marks:
         return []
@@ -126,7 +133,7 @@ def parse_channel_page(html: str, channel: str) -> list[TgMessage]:
         time_m = _TIME_RE.search(slice_)
         out.append(
             TgMessage(
-                channel=m.group(1) or channel,
+                channel=channel or m.group(1),
                 msg_id=int(m.group(2)),
                 posted_at=time_m.group(1) if time_m else None,
                 text=plain[:4000],
@@ -194,6 +201,31 @@ class TgIndex:
         ).fetchone()
         return row[0] if row and row[0] is not None else None
 
+    def normalize_channel_keys(self, known: list[str]) -> int:
+        """把历史遗留的频道键（大小写/别名不一致）归并到配置里的标准名。
+
+        修复过的问题：data-post 写 `Baidu_Netdisk`、配置写 `Baidu_netdisk`，
+        结果消息存进了另一个键，频道表里该频道显示 0 条、深度统计失真。
+        """
+        canonical = {c.lower(): c for c in known}
+        moved = 0
+        for table in ("tg_messages", "tg_channels"):
+            rows = self.conn.execute(f"SELECT DISTINCT channel FROM {table}").fetchall()
+            for (ch,) in rows:
+                target = canonical.get(str(ch).lower())
+                if target and target != ch:
+                    try:
+                        self.conn.execute(
+                            f"UPDATE OR REPLACE {table} SET channel = ? WHERE channel = ?",
+                            (target, ch),
+                        )
+                        moved += 1
+                    except sqlite3.Error:
+                        continue
+        if moved:
+            self.conn.commit()
+        return moved
+
     # ---- 查询 ----
     def search(self, kw: str, limit: int = 500) -> list[dict]:
         """按关键词检索本地索引，命中词数多的优先。"""
@@ -224,8 +256,9 @@ class TgIndex:
         with_links = self.conn.execute(
             "SELECT COUNT(*) FROM tg_messages WHERE links != '[]'"
         ).fetchone()[0]
+        # 以 tg_messages 为准实时统计，避免 tg_channels.msg_count 变脏
         channels = self.conn.execute(
-            "SELECT COUNT(*) FROM tg_channels WHERE msg_count > 0"
+            "SELECT COUNT(DISTINCT channel) FROM tg_messages"
         ).fetchone()[0]
         last = self.conn.execute("SELECT MAX(last_crawl) FROM tg_channels").fetchone()[0]
         return {
@@ -237,9 +270,13 @@ class TgIndex:
         }
 
     def channel_rows(self) -> list[tuple]:
+        """频道明细。消息数实时从 tg_messages 统计，不信 tg_channels 里的缓存值。"""
         return self.conn.execute(
-            "SELECT channel, msg_count, newest_id, oldest_id, last_status"
-            " FROM tg_channels ORDER BY msg_count DESC"
+            "SELECT c.channel,"
+            "       (SELECT COUNT(*) FROM tg_messages m WHERE m.channel = c.channel),"
+            "       c.newest_id, c.oldest_id, c.last_status"
+            " FROM tg_channels c"
+            " ORDER BY 2 DESC"
         ).fetchall()
 
     def close(self) -> None:
@@ -261,16 +298,23 @@ class TgCrawler:
     async def _page(self, client: httpx.AsyncClient, channel: str,
                     before: int | None) -> tuple[list[TgMessage], str]:
         url = f"https://t.me/s/{channel}" + (f"?before={before}" if before else "")
-        async with self.sem:
-            try:
-                resp = await client.get(url, headers={"User-Agent": UA,
-                                                      "Accept-Language": "zh-CN,zh;q=0.9"})
-            except httpx.HTTPError as exc:
-                return [], f"err:{type(exc).__name__}"
-        if resp.status_code != 200:
-            return [], f"http:{resp.status_code}"
-        msgs = parse_channel_page(resp.text, channel)
-        return msgs, "ok" if msgs else "empty"
+        last = "ok"
+        for attempt in range(2):          # 实测偶发 RemoteProtocolError，重试一次
+            async with self.sem:
+                try:
+                    resp = await client.get(url, headers={"User-Agent": UA,
+                                                          "Accept-Language": "zh-CN,zh;q=0.9"})
+                except httpx.HTTPError as exc:
+                    last = f"err:{type(exc).__name__}"
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+            if resp.status_code != 200:
+                last = f"http:{resp.status_code}"
+                await asyncio.sleep(0.5 * (attempt + 1))
+                continue
+            msgs = parse_channel_page(resp.text, channel)
+            return msgs, "ok" if msgs else "empty"
+        return [], last
 
     async def crawl_channel(self, client: httpx.AsyncClient, channel: str,
                             pages: int, *, deepen: bool = False) -> None:
