@@ -26,6 +26,7 @@ def _rrf(rank: int | None) -> float:
 def build_resources(hits: Iterable[RawHit]) -> list[Resource]:
     """按分享指纹合并，保留全部来源信息。"""
     buckets: dict[str, Resource] = {}
+    ranks: dict[str, dict[str, float]] = {}
 
     for hit in hits:
         pwd = hit.pwd or pwd_from_url(hit.url)
@@ -38,6 +39,9 @@ def build_resources(hits: Iterable[RawHit]) -> list[Resource]:
             surl, _ = parse_baidu(hit.url)
 
         key = resource_key(pan_type, hit.url, surl)
+        # 同一来源转发/补搜命中只取最佳名次，不能伪装成独立来源叠加。
+        contributions = ranks.setdefault(key, {})
+        contributions[hit.source] = max(contributions.get(hit.source, 0.0), _rrf(hit.rank))
         res = buckets.get(key)
 
         if res is None:
@@ -68,7 +72,7 @@ def build_resources(hits: Iterable[RawHit]) -> list[Resource]:
 
         # 合并
         res.hit_count += 1
-        res.rrf += _rrf(hit.rank)
+        res.rrf = sum(contributions.values())
         if hit.query and not hit.relaxed and hit.query not in res.queries:
             res.queries.append(hit.query)
         if not hit.relaxed:

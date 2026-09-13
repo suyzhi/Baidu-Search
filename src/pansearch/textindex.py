@@ -68,12 +68,12 @@ def match_phrase(term: str) -> str | None:
     """把查询词编码成 FTS5 短语匹配表达式；含单字素时返回 None（bigram 覆盖不了）。
 
     同一个 CJK 片段展开出的 bigram 在文档里是**位置相邻**的，所以用短语
-    `"沙丘" "丘预" "预言"` 能精确锁住「沙丘预言」这个子串。
+    `"沙丘 丘预 预言"` 能精确锁住「沙丘预言」这个子串。
     """
     toks = ngram_tokens(term)
     if not toks or any(len(t) < 2 for t in toks):
         return None
-    return " ".join(f'"{t}"' for t in toks)
+    return '"' + " ".join(toks) + '"'
 
 
 # ---------------------------------------------------------------- IDF

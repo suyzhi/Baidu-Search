@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from copy import deepcopy
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 import httpx
@@ -104,7 +105,8 @@ class SearchOutcome:
     def slowest_stage(self) -> str:
         if not self.timings:
             return ""
-        return max(self.timings.items(), key=lambda kv: kv[1])[0]
+        stages = {k: v for k, v in self.timings.items() if k != "total"}
+        return max(stages, key=stages.get) if stages else ""
 
 
 def build_adapters(names: list[str] | None = None):
@@ -256,6 +258,33 @@ async def _fetch_hits(
     return hits, errors, report
 
 
+def _prepare(outcome: SearchOutcome, hits: list[RawHit], equivalents: list[str],
+             types: list[PanType] | None, alive_only: bool) -> None:
+    outcome.raw_hits = len(hits)
+    resources = build_resources(hits)
+    outcome.dedup_count = len(resources)
+    if types:
+        allowed = set(types)
+        resources = [r for r in resources if r.pan_type in allowed]
+    for res in resources:
+        res.queries = list(dict.fromkeys([*res.queries, *equivalents]))
+    score_all(resources, outcome.keyword)
+    if alive_only:
+        kept = [r for r in resources if not confidently_irrelevant(r, outcome.keyword)]
+        outcome.irrelevant_pruned = len(resources) - len(kept)
+        resources = kept
+    outcome.resources = resources
+
+
+def _finish(outcome: SearchOutcome, alive_only: bool, strict: bool) -> None:
+    resources = sort_resources(score_all(outcome.resources, outcome.keyword))
+    if alive_only:
+        kept = [r for r in resources if not confidently_irrelevant(r, outcome.keyword)]
+        outcome.irrelevant_pruned += len(resources) - len(kept)
+        resources, outcome.pruned = prune(kept, strict=strict)
+    outcome.resources = resources
+
+
 async def search(
     kw: str,
     *,
@@ -267,7 +296,9 @@ async def search(
     relax: bool = True,
     verify_budget: int | None = None,
     limit: int | None = None,
+    on_progress: Callable[[SearchOutcome], Awaitable[None]] | None = None,
 ) -> SearchOutcome:
+    started = time.monotonic()
     kw = kw.strip()
     # 发给各源的是"干净检索词"：用户常把标题原样粘进来（“三体”、"三体"、《三体》全集、三体!），
     # 标点留在检索词里会让每个源的子串/LIKE 匹配都 0 命中 —— 表现为"搜什么都搜不到"。
@@ -295,6 +326,7 @@ async def search(
         if hit and time.monotonic() - hit[0] <= cache_ttl:
             cached = deepcopy(hit[1])
             cached.from_cache = True
+            cached.timings = {"total": time.monotonic() - started}
             return cached
 
     async with httpx.AsyncClient(
@@ -314,55 +346,52 @@ async def search(
             plan += [(q, True) for q in relaxed_queries(kw)]
             plan += [(q, False) for q in alias_queries(kw)]
         plan = list(dict.fromkeys(plan))
-        batches = await asyncio.gather(
-            *(
-                _fetch_hits(
-                    [a for a in adapters if not (a.primary_only and is_relaxed)],
-                    client, q,
-                )
-                for q, is_relaxed in plan
-            ),
-            return_exceptions=True,
-        )
-        outcome.timings["fetch"] = _time.monotonic() - _t_start
-
-        hits: list[RawHit] = []
-        for (query, is_relaxed), batch in zip(plan, batches):
-            if isinstance(batch, BaseException):
-                outcome.errors.setdefault("_", f"{type(batch).__name__}: {batch}")
-                continue
-            got, errs, rep = batch
-            for name, err in errs.items():
-                outcome.errors.setdefault(name, err)
-            _merge_report(outcome.source_report, rep)
-            # 适配器可能返回复用对象；不能互相覆盖主查询/别名的身份。
-            got = [hit.model_copy(update={"relaxed": is_relaxed, "query": query}) for hit in got]
-            if query != query_kw and got:
-                outcome.queries_used.append(query)
-            hits.extend(got)
-
-        outcome.raw_hits = len(hits)
-        outcome.degraded = sorted(
-            name for name, r in outcome.source_report.items()
-            if r["status"] in ("error", "timeout", "degraded")
-        )
-
-        resources = build_resources(hits)
-        outcome.dedup_count = len(resources)
-
-        if types:
-            allowed = set(types)
-            resources = [r for r in resources if r.pan_type in allowed]
-
-        # 等价别名适用于所有来源，即使这个源是用原词召回的。
         equivalents = [q for q, relaxed in plan if not relaxed]
-        for res in resources:
-            res.queries = list(dict.fromkeys([*res.queries, *equivalents]))
-        score_all(resources, kw)
-        if alive_only:
-            kept = [r for r in resources if not confidently_irrelevant(r, kw)]
-            outcome.irrelevant_pruned = len(resources) - len(kept)
-            resources = kept
+        jobs = []
+        hits: list[RawHit] = []
+        completed = {}
+
+        async def fetch_job(number, adapter, query, relaxed):
+            batch = await _fetch_hits([adapter], client, query)
+            return number, query, relaxed, batch
+
+        for q, is_relaxed in plan:
+            for adapter in adapters:
+                if adapter.primary_only and is_relaxed:
+                    continue
+                jobs.append(asyncio.create_task(fetch_job(len(jobs), adapter, q, is_relaxed)))
+        try:
+            for task in asyncio.as_completed(jobs):
+                number, query, is_relaxed, (got, errs, rep) = await task
+                completed[number] = [h.model_copy(update={"relaxed": is_relaxed, "query": query})
+                                     for h in got]
+                for name, err in errs.items():
+                    outcome.errors.setdefault(name, err)
+                _merge_report(outcome.source_report, rep)
+                outcome.degraded = sorted(name for name, report in outcome.source_report.items()
+                                          if report["status"] in ("error", "timeout", "degraded"))
+                hits = [h for n in sorted(completed) for h in completed[n]]
+                outcome.queries_used = list(dict.fromkeys([query_kw, *[h.query for h in hits if h.query]]))
+                if on_progress and got:
+                    # 每个来源只检索一次；CPU 工作移出事件循环，慢源继续并发运行。
+                    preview = deepcopy(outcome)
+                    await asyncio.to_thread(_prepare, preview, hits, equivalents, types, alive_only)
+                    preview.resources = sort_resources(preview.resources)
+                    if strict and alive_only:
+                        preview.resources, _ = prune(preview.resources, strict=True)
+                    preview.timings = {"elapsed": time.monotonic() - started}
+                    await on_progress(preview)
+        finally:
+            for job in jobs:
+                if not job.done():
+                    job.cancel()
+            await asyncio.gather(*jobs, return_exceptions=True)
+        outcome.timings["fetch"] = time.monotonic() - _t_start
+        prep_start = time.monotonic()
+        await asyncio.to_thread(_prepare, outcome, hits, equivalents, types, alive_only)
+        outcome.timings["prepare"] = time.monotonic() - prep_start
+        resources = outcome.resources
+        verify_start = time.monotonic()
 
         if do_verify and resources:
             # ---- 验活预算：先按相关性排序，只验活最相关的前 N 条 ----
@@ -376,17 +405,13 @@ async def search(
                 outcome.verify_stats = dict(pool.stats)
                 outcome.verify_budget_skipped = pool.stats.get("budget_skipped", 0)
                 outcome.verify_timeout_skipped = pool.stats.get("timeout_skipped", 0)
-    outcome.timings["verify"] = _time.monotonic() - _t_start - outcome.timings.get("fetch", 0.0)
+        outcome.timings["verify"] = time.monotonic() - verify_start if do_verify and resources else 0.0
 
-    score_all(resources, kw)
-    resources = sort_resources(resources)
-
-    if alive_only:
-        kept = [r for r in resources if not confidently_irrelevant(r, kw)]
-        outcome.irrelevant_pruned += len(resources) - len(kept)
-        resources = kept
-        # 剔除失效链接：验活过的按状态剔除；不支持验活的网盘默认保留
-        resources, outcome.pruned = prune(resources, strict=strict)
+    final_start = time.monotonic()
+    await asyncio.to_thread(_finish, outcome, alive_only, strict)
+    resources = outcome.resources
+    outcome.timings["rank"] = time.monotonic() - final_start
+    outcome.timings["total"] = time.monotonic() - started
 
     if limit:
         resources = resources[:limit]

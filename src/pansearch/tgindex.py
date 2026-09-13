@@ -28,7 +28,7 @@ import httpx
 from .config import CACHE_DIR, CONFIG_DIR
 from .extract import extract_from_text, html_to_text
 from .normalize import URL_RE, detect_pan_type, pwd_from_url
-from .query import query_terms, subject_terms, term_present
+from .query import matching_text, query_info, query_terms, subject_terms, term_present
 from .textindex import match_phrase, ngram_encode
 
 DEFAULT_DB = CACHE_DIR / "tg_index.sqlite3"
@@ -335,7 +335,7 @@ class TgIndex:
         terms = query_terms(kw)[:6]
         if not any(terms):
             return []
-        subjects = subject_terms(kw) or terms
+        subjects = list(query_info(kw).required) or terms
         if self.fts_ready():
             rows = self._search_fts(terms, subjects, limit)
             if rows is not None:
@@ -348,6 +348,9 @@ class TgIndex:
             phrase = match_phrase(t)
             if phrase is None:
                 return None      # 含单字素（bigram 索引覆盖不了）-> 回退 LIKE
+            if re.fullmatch(r"[a-z]{2,}", t):
+                # 索引把 Serum2 当整词；前缀召回后按词边界剔除 serumology。
+                phrase += "*"
             phrases.append(phrase)
         if not phrases:
             return None
@@ -359,14 +362,16 @@ class TgIndex:
             rows = self.conn.execute(
                 "SELECT m.channel, m.msg_id, m.posted_at, m.text, m.links, bm25(tg_fts)"
                 " FROM tg_fts JOIN tg_messages m ON m.rowid = tg_fts.rowid"
-                " WHERE tg_fts MATCH ? ORDER BY bm25(tg_fts) LIMIT ?",
+                " WHERE tg_fts MATCH ? AND m.links != '[]' ORDER BY rank LIMIT ?",
                 (match, fetch),
             ).fetchall()
         except sqlite3.OperationalError:
             return None
         out: list[dict] = []
         for channel, msg_id, posted_at, text, links, bm in rows:
-            low = (text or "").lower()
+            low = matching_text(text or "")
+            if not any(term_present(low, t) for t in subjects):
+                continue
             out.append({
                 "channel": channel, "msg_id": msg_id, "posted_at": posted_at,
                 "text": text, "links": json.loads(links or "[]"),
@@ -385,10 +390,13 @@ class TgIndex:
         subject_like = [pattern(t) for t in subjects]
         score_expr = " + ".join(["CASE WHEN text LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END"] * len(terms))
         where = " OR ".join(["text LIKE ? ESCAPE '\\'"] * len(subjects))
+        # LIKE 只负责粗筛；URL 子串和英文词内部命中必须在 LIMIT 前剔除。
+        self.conn.create_function("pan_matches", 1,
+                                  lambda text: any(term_present(text or "", t) for t in subjects))
 
         sql = (
             f"SELECT channel, msg_id, posted_at, text, links, ({score_expr}) AS hits"
-            f" FROM tg_messages WHERE links != '[]' AND ({where})"
+            f" FROM tg_messages WHERE links != '[]' AND ({where}) AND pan_matches(text)"
             " ORDER BY hits DESC, posted_at DESC, channel, msg_id DESC LIMIT ?"
         )
         params = [*like, *subject_like, limit]

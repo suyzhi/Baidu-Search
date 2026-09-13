@@ -29,7 +29,7 @@ def test_ngram_encoder(text, expected):
 
 def test_match_phrase_rejects_single_char():
     assert textindex.match_phrase("沙丘") == '"沙丘"'
-    assert textindex.match_phrase("沙丘预言") == '"沙丘" "丘预" "预言"'
+    assert textindex.match_phrase("沙丘预言") == '"沙丘 丘预 预言"'
     assert textindex.match_phrase("单") is None      # 单字素 bigram 覆盖不了 -> 回退 LIKE
 
 

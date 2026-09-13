@@ -98,23 +98,58 @@ class PansouAdapter(Adapter):
         return None
 
     async def search(self, kw: str, client: httpx.AsyncClient) -> list[RawHit]:
-        payload = None
-        errors: list[str] = []
+        instances = _healthy_first(self.instances)
+        deadline = float(self.cfg.get("deadline") or 15)
+        end = time.monotonic() + deadline * 0.95
+        delay = max(0.0, float(self.cfg.get("failover_delay", min(3.0, deadline / 3))))
+        pending = {}
+        errors = []
+        next_instance = 0
         self.used_instance = None
-        for instance in _healthy_first(self.instances):
-            try:
-                payload = await self._query(client, instance, kw)
-            except RuntimeError as exc:
-                _HEALTH[instance] = time.monotonic() + HEALTH_TTL_SECONDS
-                errors.append(f"{instance}: {exc}")
-                continue
-            _HEALTH.pop(instance, None)          # 恢复健康
-            if payload:
-                self.used_instance = instance
-                break
-        if not payload:
-            raise RuntimeError("; ".join(errors) or "PanSou 无响应")
-        return self._parse(payload, kw)
+
+        def launch():
+            nonlocal next_instance
+            instance = instances[next_instance]
+            next_instance += 1
+            pending[asyncio.create_task(self._query(client, instance, kw))] = instance
+            return time.monotonic() + delay
+
+        next_launch = launch() if instances else end
+        try:
+            while pending:
+                now = time.monotonic()
+                timeout = min(end, next_launch if next_instance < len(instances) else end) - now
+                done, _ = await asyncio.wait(pending, timeout=max(0.0, timeout),
+                                             return_when=asyncio.FIRST_COMPLETED)
+                if not done:
+                    # 慢实例暂时降优先级；备用请求启动后保留主请求，避免丢掉冷启动结果。
+                    for instance in pending.values():
+                        _HEALTH[instance] = time.monotonic() + HEALTH_TTL_SECONDS
+                    if time.monotonic() >= end:
+                        errors.extend(f"{u}: 实例超时" for u in pending.values())
+                        break
+                    next_launch = launch()
+                    continue
+                for task in done:
+                    instance = pending.pop(task)
+                    try:
+                        payload = task.result()
+                        if not payload:
+                            raise RuntimeError("PanSou 无响应")
+                    except (RuntimeError, asyncio.TimeoutError) as exc:
+                        _HEALTH[instance] = time.monotonic() + HEALTH_TTL_SECONDS
+                        errors.append(f"{instance}: {str(exc) or '实例超时'}")
+                        continue
+                    _HEALTH.pop(instance, None)
+                    self.used_instance = instance
+                    return self._parse(payload, kw)
+                if not pending and next_instance < len(instances):
+                    next_launch = launch()
+        finally:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+        raise RuntimeError("; ".join(errors) or "PanSou 无响应")
 
     def _parse(self, payload: dict, kw: str) -> list[RawHit]:
         data = payload.get("data") or {}

@@ -1,0 +1,517 @@
+[
+  {
+    "query": "大气合成器",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "Omnisphere 2 音源",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "Omnisphere Factory Library",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "合成器 音乐合集",
+        "grade": 0
+      },
+      {
+        "id": "d3",
+        "title": "Photoshop 软件",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "沙丘预言",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "沙丘：预言 4K",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "沙丘 预言 全集",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "沙丘 科幻 丘预 故事 预言",
+        "grade": 0
+      },
+      {
+        "id": "d3",
+        "title": "预言 丘预 沙丘",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "沙丘 电影",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "machine learning",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "Machine Learning 实战",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "机器学习 Machine Learning 课程",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "ELF Learning 英语启蒙",
+        "grade": 0
+      },
+      {
+        "id": "d3",
+        "title": "War Machine",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "Machinery Learning",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "Serum 合成器",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "Serum2 合成器",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "Xfer Serum 合成器",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "Serum 音源",
+        "grade": 1
+      },
+      {
+        "id": "d3",
+        "title": "合成器 音乐专辑",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "Serumology 教材",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "C# 教程",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "C# 教程入门",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "C# 编程教程",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "ABC# 编程",
+        "grade": 0
+      },
+      {
+        "id": "d3",
+        "title": "C++ 教程",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "提取码 https://pan.baidu.com/s/1abc?pwd=wc#",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "C++ 教程",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "C++ 教程",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "零基础 C++ 教程",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "C# 教程",
+        "grade": 0
+      },
+      {
+        "id": "d3",
+        "title": "ABC++ 教程",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "C 语言教程",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "沙丘 4K HDR",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "沙丘 4K HDR",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "沙丘 4kHDR 原盘",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "沙丘 1080p",
+        "grade": 1
+      },
+      {
+        "id": "d3",
+        "title": "黑夏 4K HDR",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "沙丘鹤 自然纪录片",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "庆余年 第二季",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "庆余年 第二季 全集",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "庆余年 第二季 4K",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "庆余年 第一季",
+        "grade": 1
+      },
+      {
+        "id": "d3",
+        "title": "斗破苍穹 第二季",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "第二季 动画合集",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "MATLAB 破解",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "MATLAB R2024b 破解",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "MATLAB 破解安装包",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "MATLAB 经典教程",
+        "grade": 1
+      },
+      {
+        "id": "d3",
+        "title": "河神之渡阴 破解版",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "AutoCAD 破解",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "周杰倫 無損",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "周杰伦 无损 专辑",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "周傑倫 無損 FLAC",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "周杰伦 MP3",
+        "grade": 1
+      },
+      {
+        "id": "d3",
+        "title": "林俊杰 无损",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "无损 音乐合集",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "Adobe Photoshop",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "Adobe Photoshop 2026",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "Adobe Photoshop Express",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "Adobe Premiere Pro",
+        "grade": 0
+      },
+      {
+        "id": "d3",
+        "title": "Photoshop 替代品 GIMP",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "Python 入门",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "Python 入门教程",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "Python 入门到精通",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "Python 进阶课程",
+        "grade": 1
+      },
+      {
+        "id": "d3",
+        "title": "Pythonic 设计模式",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "Java 入门",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "三体 电视剧 4K",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "三体 电视剧 4K",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "三体 4K 电视剧 全集",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "三体 电视剧 1080p",
+        "grade": 1
+      },
+      {
+        "id": "d3",
+        "title": "繁花 电视剧 4K",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "电视剧 合集",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "AutoCAD破解版",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "AutoCAD 破解版",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "AutoCAD破解版 安装教程",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "SolidWorks 破解版",
+        "grade": 0
+      },
+      {
+        "id": "d3",
+        "title": "破解版软件合集",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "流浪地球 2",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "流浪地球 2 4K",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "流浪地球2 蓝光",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "流浪地球 2024 合集",
+        "grade": 1
+      },
+      {
+        "id": "d3",
+        "title": "流浪地球仪 安装教程",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "地球 纪录片",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "Notepad++",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "Notepad++ 8.6",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "Notepad++ 编辑器",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "Notepad 编辑器",
+        "grade": 0
+      },
+      {
+        "id": "d3",
+        "title": "OtherNotepad++ 工具",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "深度学习",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "深度学习 教材",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "深度：学习 笔记",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "深度 科技 度学 兴趣 学习",
+        "grade": 0
+      },
+      {
+        "id": "d3",
+        "title": "学习方法 课程",
+        "grade": 0
+      }
+    ]
+  },
+  {
+    "query": "星际穿越 蓝光",
+    "documents": [
+      {
+        "id": "d0",
+        "title": "星际穿越 蓝光",
+        "grade": 2
+      },
+      {
+        "id": "d1",
+        "title": "星际穿越 蓝光原盘",
+        "grade": 2
+      },
+      {
+        "id": "d2",
+        "title": "星际穿越 1080p",
+        "grade": 1
+      },
+      {
+        "id": "d3",
+        "title": "星际迷航 蓝光",
+        "grade": 0
+      },
+      {
+        "id": "d4",
+        "title": "穿越 星空 纪录片",
+        "grade": 0
+      }
+    ]
+  }
+]

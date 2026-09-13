@@ -121,6 +121,7 @@
 const $ = s => document.querySelector(s);
 const resultsEl = $('#results'), statsEl = $('#stats'), goBtn = $('#go');
 let activeType = '';
+let activeSearch = null, searchGeneration = 0;
 
 document.querySelectorAll('#typeFilters .chip').forEach(chip => {
   chip.onclick = () => {
@@ -135,6 +136,7 @@ $('#kw').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); }
 goBtn.onclick = doSearch;
 $('#aliveOnly').onchange = () => { if ($('#kw').value.trim()) doSearch(); };
 $('#strict').onchange = () => { if ($('#kw').value.trim()) doSearch(); };
+$('#doVerify').onchange = () => { if ($('#kw').value.trim()) doSearch(); };
 
 function esc(s){
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
@@ -163,28 +165,62 @@ function statusClass(s){
 async function doSearch(){
   const kw = $('#kw').value.trim();
   if (!kw) return;
-  goBtn.disabled = true;
-  resultsEl.innerHTML = '<div class="empty"><span class="spinner"></span>正在并发检索全网数据源并校验链接有效性…</div>';
+  if (activeSearch) activeSearch.abort();
+  const controller = new AbortController();
+  activeSearch = controller;
+  const generation = ++searchGeneration;
+  goBtn.textContent = '重新搜索';
+  resultsEl.innerHTML = '<div class="empty"><span class="spinner"></span>正在检索，有结果后立即显示…</div>';
   statsEl.classList.remove('show');
-
   const params = new URLSearchParams({kw, limit: 100,
     alive_only: $('#aliveOnly').checked, verify: $('#doVerify').checked,
     strict: $('#strict').checked});
   if (activeType) params.set('types', activeType);
-
   const t0 = Date.now();
-  try{
-    const resp = await fetch('/api/search?' + params);
+  let hasResults = false, complete = false;
+  try {
+    const resp = await fetch('/api/search/stream?' + params, {signal: controller.signal});
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    render(await resp.json(), ((Date.now() - t0) / 1000).toFixed(1));
-  }catch(err){
-    resultsEl.innerHTML = '<div class="empty">搜索失败：' + esc(err.message) + '</div>';
-  }finally{
-    goBtn.disabled = false;
+    const reader = resp.body.getReader(), decoder = new TextDecoder();
+    let buffer = '';
+    function receive(line) {
+      if (!line.trim() || generation !== searchGeneration) return;
+      const event = JSON.parse(line);
+      if (event.event === 'error') throw new Error(event.data.message);
+      if (event.event !== 'progress' && event.event !== 'complete') return;
+      complete = event.event === 'complete';
+      hasResults = event.data.results.length > 0;
+      render(event.data, ((Date.now() - t0) / 1000).toFixed(1), !complete);
+    }
+    while (true) {
+      const {value, done} = await reader.read();
+      if (generation !== searchGeneration) return;
+      buffer += decoder.decode(value, {stream: !done});
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) receive(line);
+      if (done) {
+        if (buffer.trim()) receive(buffer);
+        break;
+      }
+    }
+    if (!complete) throw new Error('连接中断，搜索尚未完成');
+  } catch (err) {
+    if (err.name === 'AbortError' || generation !== searchGeneration) return;
+    if (hasResults) {
+      statsEl.innerHTML += '<br><span style="color:var(--yellow)">已保留部分结果：' + esc(err.message) + '</span>';
+    } else {
+      resultsEl.innerHTML = '<div class="empty">搜索失败：' + esc(err.message) + '</div>';
+    }
+  } finally {
+    if (generation === searchGeneration) {
+      activeSearch = null;
+      goBtn.textContent = '搜索';
+    }
   }
 }
 
-function render(data, secs){
+function render(data, secs, pending = false){
   const parts = [];
   parts.push('原始命中 <b>' + data.raw_hits + '</b>');
   parts.push('去重 <b>' + data.dedup_count + '</b>');
@@ -201,6 +237,7 @@ function render(data, secs){
   parts.push('数据源 <b>' + (data.used_sources || []).join(' + ') + '</b>');
 
   let html = parts.join(' ｜ ');
+  if (pending) html = '<span class="spinner"></span>已找到部分结果，正在继续检索与校验…<br>' + html;
 
   if ((data.degraded || []).length) {
     html = '<span style="color:var(--yellow)">⚠ 召回降级：' +
@@ -243,7 +280,9 @@ function render(data, secs){
   statsEl.classList.add('show');
 
   if (!data.results.length){
-    resultsEl.innerHTML = '<div class="empty">没有找到结果。<br>试试换个关键词，或取消「只看存活」。</div>';
+    resultsEl.innerHTML = pending
+      ? '<div class="empty"><span class="spinner"></span>正在继续检索' + (data.strict ? '，严格模式等待链接校验完成' : '') + '…</div>'
+      : '<div class="empty">没有找到结果。<br>试试换个关键词，或取消「只看存活」。</div>';
     return;
   }
 

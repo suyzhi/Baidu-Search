@@ -309,7 +309,7 @@ async def test_outcome_exposes_stage_timings(monkeypatch):
     assert "fetch" in out.timings
     assert "verify" in out.timings
     assert out.timings["fetch"] >= 0
-    assert out.slowest_stage in ("fetch", "verify")
+    assert out.slowest_stage in ("fetch", "prepare", "verify", "rank")
 
 
 async def test_slowest_stage_empty_without_timings():

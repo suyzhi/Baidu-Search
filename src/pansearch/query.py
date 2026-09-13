@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from dataclasses import dataclass
 from functools import lru_cache
 
 # 简繁归一（可选依赖 opencc-purepy）：TG 频道里繁体标题很常见，
@@ -132,7 +133,8 @@ def normalize_text(text: str) -> str:
     return unicodedata.normalize("NFKC", folded).casefold().strip()
 
 
-def split_query(query: str) -> list[str]:
+@lru_cache(maxsize=16384)
+def _split_query(query: str) -> tuple[str, ...]:
     """把查询切成词（保留原始大小写），丢掉纯标点碎片。
 
     保留大小写是为了补搜词展示/检索更自然（"Dune" 不该变成 "dune"）；
@@ -146,11 +148,40 @@ def split_query(query: str) -> list[str]:
         if not token or not any(ch.isalnum() for ch in token):
             continue
         out.extend(_segment(token))
-    return [t for t in out if t and any(ch.isalnum() for ch in t)]
+    return tuple(t for t in out if t and any(ch.isalnum() for ch in t))
+
+
+def split_query(query: str) -> list[str]:
+    # 缓存只保存不可变对象，调用方修改返回列表不会污染后续查询。
+    return list(_split_query(query))
+
+
+# 这些词描述资源类别；有具体名称时不能独自决定相关性。
+_CATEGORIES = frozenset({
+    "电影", "电视剧", "剧集", "专辑", "歌曲", "漫画", "合成器", "音源",
+    "小说", "论文", "作品集", "素材", "素材包", "模型", "插件", "预设", "preset",
+    "修复版", "最终季", "剧场版", "三部曲", "纯音乐",
+})
+_SEASON = re.compile(r"(?:第[一二三四五六七八九十百\d]+季|s\d{1,2})$")
+
+
+@dataclass(frozen=True)
+class QueryInfo:
+    terms: tuple[str, ...]
+    subjects: tuple[str, ...]
+    required: tuple[str, ...]
+
+
+@lru_cache(maxsize=16384)
+def query_info(query: str) -> QueryInfo:
+    terms = tuple(dict.fromkeys(t.casefold() for t in _split_query(query)))
+    subjects = tuple(t for t in terms if t not in MODIFIERS and not t.isdigit())
+    required = tuple(t for t in subjects if t not in _CATEGORIES and not _SEASON.fullmatch(t))
+    return QueryInfo(terms, subjects, required or subjects)
 
 
 def query_terms(query: str) -> list[str]:
-    return list(dict.fromkeys(t.casefold() for t in split_query(query)))
+    return list(query_info(query).terms)
 
 
 def subject_terms(query: str) -> list[str]:
@@ -159,7 +190,7 @@ def subject_terms(query: str) -> list[str]:
     全部被过滤时返回空列表 —— 调用方应回退到 query_terms（例如查询本身就是
     「4K」「下载」「网课」这种词）。
     """
-    return [t for t in query_terms(query) if t not in MODIFIERS and not t.isdigit()]
+    return list(query_info(query).subjects)
 
 
 def analyze(query: str) -> dict[str, list[str]]:
@@ -173,16 +204,31 @@ def analyze(query: str) -> dict[str, list[str]]:
     }
 
 
-def term_present(text: str, term: str) -> bool:
-    if term in MODIFIERS:
-        return term in text  # 4kHDR/DV 这类连写格式也应匹配。
+@lru_cache(maxsize=16384)
+def matching_text(text: str) -> str:
+    """URL 和提取码不是标题证据，例如链接末尾的 c# 不能命中 C# 教程。"""
+    cleaned = re.sub(r"https?://\S+|magnet:\?\S+", " ", normalize_text(text))
+    # 提取器截在分享链接结尾时可能留下这些参数；它们也不提供内容证据。
+    return re.sub(r"[?&](?:pwd|password|code|public)=[^\s]+", " ", cleaned).strip()
+
+
+@lru_cache(maxsize=4096)
+def _term_pattern(term: str) -> re.Pattern:
     if re.search(r"[\u3400-\u9fff]", term):
-        # 分享标题常在中文名/续集编号间插空格，不能因此漏掉同名资源。
-        pattern = r"\s*".join(re.escape(ch) for ch in term)
+        # 与索引一致，中文名称里的标点/空白不改变名称。
+        pattern = f"[{_SEPARATORS}]*".join(re.escape(ch) for ch in term)
         if term[-1:].isdigit():
             pattern += r"(?!\d)"
-        return re.search(pattern, text) is not None
-    # 英文词不能在 unrelated/machinery 这类单词内部误命中；允许 Serum2/4K。
-    if re.fullmatch(r"[a-z][a-z0-9+]*", term):
-        return re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", text) is not None
-    return term in text
+        return re.compile(pattern)
+    if re.fullmatch(r"[a-z][a-z0-9+#]*", term):
+        # 保留 Serum2 版本后缀，C / C++ / C# 则分别匹配。
+        return re.compile(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z+#])")
+    return re.compile(re.escape(term))
+
+
+def term_present(text: str, term: str) -> bool:
+    text = matching_text(text)
+    term = normalize_text(term)
+    if term in MODIFIERS:
+        return term in text
+    return bool(term and _term_pattern(term).search(text))

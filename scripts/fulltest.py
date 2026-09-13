@@ -29,9 +29,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from pansearch.pipeline import search  # noqa: E402
-from pansearch.query import normalize_text, subject_terms, term_present  # noqa: E402
-from pansearch.score import _relevance, anchor_term  # noqa: E402
+from pansearch.pipeline import alias_queries, search  # noqa: E402
+from pansearch.query import matching_text, normalize_text, query_info, subject_terms, term_present  # noqa: E402
+from pansearch.score import _relevance  # noqa: E402
 
 QUERIES = ROOT / "scripts" / "fulltest_queries.txt"
 CACHE = ROOT / ".cache"
@@ -51,17 +51,12 @@ def load_queries() -> list[tuple[str, str]]:
 
 
 def subject_of(kw: str) -> str:
-    """与引擎一致的**锚点**主题词（最高 IDF 的内容词）。
-
-    不能用"第一个空格分隔的词"：多主题词查询里锚点可能是第二个词
-    （「Serum 合成器」的锚点是 serum 而不是"合成器"），用第一个词会把
-    引擎正确的行为误判成"主题词缺失"。
-    """
-    return anchor_term(kw)
+    """词面诊断展示具体主题；独立质量分数由 quality_eval.py 的固定标签计算。"""
+    return " ".join(query_info(kw).required)
 
 
 def evaluate(vertical: str, kw: str, outcome, elapsed: float, top_n: int) -> dict:
-    subj = subject_of(kw).lower()
+    required_queries = [query_info(q).required for q in [kw, *alias_queries(kw)]]
     rows = outcome.resources
 
     def exempt(r) -> bool:
@@ -72,17 +67,16 @@ def evaluate(vertical: str, kw: str, outcome, elapsed: float, top_n: int) -> dic
         if "api" in (r.kinds or []):
             return True
         for t in [r.title, *(getattr(r, "titles", None) or [])]:
-            nt = normalize_text(t or "")
+            nt = matching_text(t or "")
             if not nt or not subject_terms(nt):
                 return True
         return False
 
     def has_anchor(r) -> bool:
-        """任一来源标题命中锚点即算命中（与引擎一致：去重时保留多份标题证据）。"""
-        if not subj:
-            return True
+        """诊断完整主题/等价别名，不能把稀有的“素材包”误当资源名称。"""
         for t in [r.title, *(getattr(r, "titles", None) or [])]:
-            if term_present(normalize_text(t or ""), subj):
+            if any(all(term_present(t or "", term) for term in required)
+                   for required in required_queries):
                 return True
         return False
 
@@ -120,6 +114,7 @@ def evaluate(vertical: str, kw: str, outcome, elapsed: float, top_n: int) -> dic
         "absent_top": absent_top,
         "low_rel_top": low_rel_top,
         "absent_top_ratio": round(absent_top / len(checked_top), 3) if checked_top else 0.0,
+        "evaluated_top": len(checked_top),
         "empty_title_top": empty_title_top,
         "dupe_urls": dupes,
         "dupe_keys": dupe_keys,
@@ -173,7 +168,7 @@ def report(results: list[dict], top_n: int) -> dict:
     low = sum(r.get("low_rel_top", 0) for r in ok)
     api_top = sum(r.get("api_top", 0) for r in ok)
     filtered = sum(r.get("filtered", 0) for r in ok)
-    slots = len(ok) * top_n - api_top
+    slots = sum(r["evaluated_top"] for r in ok)
     dupe = sum(r.get("dupe_urls", 0) for r in ok)
     empty_title = sum(r.get("empty_title_top", 0) for r in ok)
 
@@ -181,7 +176,7 @@ def report(results: list[dict], top_n: int) -> dict:
     print(f"查询 {len(results)} ｜ 有结果 {len(ok)} ｜ 空结果 {len(emptied)} ｜ 异常 {len(errors)}")
     print(f"结果总数 {total_shown} ｜ 平均 {total_shown / max(1, len(ok)):.1f} 条/查询")
     print(f"相关性闸门共丢弃 {filtered} 条不相关结果")
-    print(f"top{top_n} API 直链豁免 {api_top} 条（不计入相关性判定）")
+    print(f"top{top_n} API/无标题证据豁免 {api_top} 条（不计入词面匹配判定）")
     print(f"top{top_n} 主题词缺失 {absent}/{slots} = {absent / max(1, slots):.1%}")
     print(f"top{top_n} 低相关(rel<0.4) {low}/{slots} = {low / max(1, slots):.1%}")
     print(f"top{top_n} 空标题 {empty_title} ｜ 重复 URL {dupe}")
@@ -200,7 +195,7 @@ def report(results: list[dict], top_n: int) -> dict:
     # 不苛求 0：引擎会刻意保留"跨语言标题 / 无标题证据"的结果（那是召回保险，
     # 不是 bug），允许 1% 的保守保留。
     gate = ok_ratio >= 0.95 and absent_ratio <= 0.01 and not errors
-    print(f"\n可靠性门槛（有结果≥95% / top{top_n}无关≤1% / 异常=0）："
+    print(f"\n词面回归门槛（不是独立准确率；独立标注见 quality_eval.py）："
           f"{'[green]PASS[/green]' if gate else '[red]FAIL[/red]'}"
           f"  有结果率 {ok_ratio:.1%} ｜ top{top_n}无关 {absent_ratio:.2%}")
 
