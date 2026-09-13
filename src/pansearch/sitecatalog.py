@@ -306,10 +306,19 @@ class SiteEntry:
 
     @classmethod
     def from_dict(cls, d: dict) -> SiteEntry:
+        from .normalize import safe_hostname
+
+        search = str(d.get("search") or "")
+        domain = str(d.get("domain") or "")
+        if not domain and search:
+            # 目录条目历来都带 domain，但内置兜底清单 / 临时配置只写 search 模板。
+            # 不补 domain 的话 host 会是空串：站点健康度全部记到同一个空键上，
+            # 连续失败后 disabled() 返回 {""}，永远匹配不到任何真实站点。
+            domain = safe_hostname(search) or ""
         return cls(
-            name=str(d.get("name") or d.get("domain") or ""),
-            domain=str(d.get("domain") or ""),
-            search=str(d.get("search") or ""),
+            name=str(d.get("name") or domain or ""),
+            domain=domain,
+            search=search,
             result_re=str(d.get("result_re") or ""),
             verticals=[str(v) for v in (d.get("verticals") or [])],
             verified=bool(d.get("verified")),

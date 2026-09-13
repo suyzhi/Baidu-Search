@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .extract import excerpt
@@ -46,7 +46,9 @@ async def api_search(
             try:
                 type_list.append(PanType(token))
             except ValueError:
-                continue
+                # 不能静默跳过：一个都不认识时会退化成 types=None（= 不过滤），
+                # 调用方以为限定了类型，实际拿到全部网盘的结果。
+                raise HTTPException(status_code=422, detail=f"未知网盘类型: {token!r}")
         type_list = type_list or None
 
     outcome = await run_search(

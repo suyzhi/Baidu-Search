@@ -117,7 +117,13 @@ def detect_pan_type(url: str) -> PanType:
     if not host:
         return PanType.OTHER
     for suffix, pan in _HOST_RULES:
-        if host == suffix or host.endswith("." + suffix):
+        if suffix.endswith("."):
+            # 前缀式规则：域名是轮换的（libgen.is / .li / .rs、sci-hub.se / .st / .ru），
+            # 没法逐个列举。注意不能走下面的 host.endswith("." + suffix) ——
+            # 那要求 host 里出现 ".libgen."，永远匹配不到，这些链接会被静默丢掉。
+            if host.startswith(suffix) or f".{suffix}" in host:
+                return pan
+        elif host == suffix or host.endswith("." + suffix):
             return pan
     return PanType.OTHER
 

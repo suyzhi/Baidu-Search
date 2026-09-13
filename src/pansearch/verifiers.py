@@ -165,6 +165,13 @@ class AliyunVerifier(ServiceVerifier):
         by_http = _decide(self.cfg.get("http") or {}, resp.status_code)
         if by_http != "unknown":
             return self._status(by_http, errno=resp.status_code, method=self.name)
+        if resp.status_code != 200:
+            # 非 200 又没有 code 字段（429 限流 / 5xx / 403…）**不是"存活"**。
+            # 原代码会径直走到下面的 alive，把一个被限流的检查显示成"有效"，
+            # 还会写进验活缓存（TTL 6h）—— 之后一直用缓存里的假 ALIVE。
+            # 夸克/115/天翼在同样情况下都返回 unknown。
+            return self._status("unknown", errno=resp.status_code,
+                                note=f"HTTP {resp.status_code}", method=self.name)
 
         # 有 expiration 字段时据此判过期
         expiration = payload.get("expiration")

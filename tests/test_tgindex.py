@@ -124,6 +124,34 @@ def test_index_search_multiterm_ranks_by_hit_count(tmp_path):
     idx.close()
 
 
+def test_index_search_subject_term_is_never_crowded_out(tmp_path):
+    """回归（核心 bug）：多词查询是 OR 语义，只含限定词的消息会挤满 LIMIT。
+
+    实测「SolidWorks 破解」400 条里含 subject 的只有 **2** 条，
+    只含「破解」的有 399 条；按命中词数排序时主题词命中的消息一条都剩不下。
+    """
+    idx = make_index(tmp_path)
+    idx.upsert([
+        TgMessage(channel=f"noise{i}", msg_id=i, posted_at=None, text=f"4K HDR 通用内容 {i}",
+                  links=[{"url": f"https://pan.quark.cn/s/noise{i:010d}", "pwd": None}])
+        for i in range(50)
+    ] + [
+        TgMessage(channel="real", msg_id=999, posted_at=None, text="沙丘 纪录片",
+                  links=[{"url": "https://pan.quark.cn/s/subject0001", "pwd": None}]),
+    ])
+    rows = idx.search("沙丘 4K HDR", limit=10)
+    assert rows[0]["msg_id"] == 999, "主题词命中的消息必须永远排在只含限定词的消息前面"
+    idx.close()
+
+
+def test_is_empty(tmp_path):
+    idx = make_index(tmp_path)
+    assert idx.is_empty() is True
+    idx.upsert([TgMessage(channel="a", msg_id=1, posted_at=None, text="随便")])
+    assert idx.is_empty() is False
+    idx.close()
+
+
 def test_index_upsert_is_idempotent(tmp_path):
     idx = make_index(tmp_path)
     msgs = parse_channel_page(PAGE, "ch")
@@ -131,6 +159,43 @@ def test_index_upsert_is_idempotent(tmp_path):
     idx.upsert(msgs)                                   # 同一批再写一次
     assert idx.stats()["messages"] == 3
     idx.close()
+
+
+def test_tg_digest_links_get_their_own_title():
+    """回归（核心 bug 的更深根因）：合集帖里每个链接只该拿自己那段前文当标题。
+
+    实测一条 21 个链接的合集帖，搜「SolidWorks」时 21 个链接全被判相关
+    （「iSkysoft PDF Editor」「AG视频解析」…）—— 就因为整条消息里出现过
+    "SolidWorks"。按链接取局部标题后，只有真正那条留下。
+    """
+    from pansearch.adapters.telegram import TelegramAdapter
+
+    text = ("会声会影软件及教程 https://www.aliyundrive.com/s/AAAA "
+            "iSkysoft PDF Editor PDF转WORD工具 https://www.aliyundrive.com/s/BBBB "
+            "常用软件（MATLAB、AutoCAD、SolidWorks、CATIA） https://www.aliyundrive.com/s/CCCC "
+            "Solidworks视频教程 https://www.aliyundrive.com/s/DDDD")
+
+    assert "PDF Editor" in TelegramAdapter._local_title(
+        text, "https://www.aliyundrive.com/s/BBBB", "SolidWorks")
+    assert "SolidWorks" in TelegramAdapter._local_title(
+        text, "https://www.aliyundrive.com/s/CCCC", "SolidWorks")
+
+    rows = [{
+        "channel": "c", "msg_id": 1, "posted_at": None, "text": text,
+        "links": [{"url": f"https://www.aliyundrive.com/s/{x}", "pwd": None}
+                  for x in ("AAAA", "BBBB", "CCCC", "DDDD")],
+    }]
+    hits = TelegramAdapter._to_hits(rows, "SolidWorks")
+    titles = {h.url.rsplit("/", 1)[-1]: (h.title or "").lower() for h in hits}
+    assert "solidworks" in titles["CCCC"]
+    assert "solidworks" in titles["DDDD"]
+    assert "solidworks" not in titles["BBBB"], "PDF Editor 那条不该带上别人的主题词"
+
+
+def test_tg_local_title_falls_back_when_link_not_in_text():
+    from pansearch.adapters.telegram import TelegramAdapter
+
+    assert TelegramAdapter._local_title("没有任何链接的正文", "https://x/y", "k") is None
 
 
 def test_index_tracks_oldest_for_deepening(tmp_path):

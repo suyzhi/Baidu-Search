@@ -69,6 +69,23 @@ _NOISE_EXT = (
 )
 
 
+def _is_noise_host(host: str) -> bool:
+    """搜索引擎自身 / CDN / 统计站，不该作为"资源讨论页"去抓。
+
+    带点的条目（bing.com / x.com / qq.com）必须按**域名边界**匹配：
+    原来的子串匹配会把 "x.com" 匹配到 box.com / netflix.com / linux.com，
+    把大量正常内容页当噪声排除 —— 而阶段 2 抓内容页正是召回主力。
+    以 "." 结尾或根本没有点的条目（google. / googlesyndication）才按子串。
+    """
+    for noise in _NOISE_HOSTS:
+        if noise.endswith(".") or "." not in noise:
+            if noise in host:
+                return True
+        elif host == noise or host.endswith("." + noise):
+            return True
+    return False
+
+
 @register
 class WebSearchAdapter(Adapter):
     name = "websearch"
@@ -183,7 +200,7 @@ class WebSearchAdapter(Adapter):
             host = (parsed.hostname or "").lower()
             if not host or parsed.scheme not in ("http", "https"):
                 continue
-            if any(noise in host for noise in _NOISE_HOSTS):
+            if _is_noise_host(host):
                 continue
             if parsed.path.lower().endswith(_NOISE_EXT):
                 continue

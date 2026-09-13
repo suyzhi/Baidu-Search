@@ -191,9 +191,15 @@ def load_candidate_file(path: str | Path) -> list[str]:
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
-        m = re.search(r"t\.me/([A-Za-z0-9_]{4,})", line)
+        m = re.search(r"t\.me/(?:s/)?([A-Za-z0-9_]{4,})", line)
+        if not m and line.startswith(("http://", "https://", "t.me/")):
+            # 邀请链接 / 私有链接（t.me/+hash、t.me/c/123）不是可抓的公开频道名，
+            # 原来会把整条 URL 当频道名去请求 t.me/s/https://... （必然 404）。
+            continue
         name = (m.group(1) if m else line.split()[0]).lstrip("@")
-        if name.startswith(("joinchat", "addstickers", "share", "iv")):
+        # 只排除 t.me 的保留路径；不能用 startswith，否则会误杀
+        # ivsky_pan / shareMovies 这类名字里恰好以这些字母开头的真频道。
+        if name in ("joinchat", "addstickers", "share", "iv", "c", "s"):
             continue
         out.append(name)
     return list(dict.fromkeys(out))
