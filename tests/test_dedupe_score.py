@@ -228,12 +228,12 @@ def test_relevance_dominates_pan_priority():
     assert scored[0] is relevant_quark, "高度相关的结果必须排在前面，即使它不是百度网盘"
 
 
-def test_relaxed_only_hits_are_downweighted():
-    primary = _make("1AAA", Status.ALIVE)
+def test_relaxed_partial_hits_are_downweighted():
+    primary = _make("1AAA", Status.ALIVE, title="三体")
     primary.from_primary = True
-    relaxed = _make("1BBB", Status.ALIVE)
+    relaxed = _make("1BBB", Status.ALIVE, title="三体")
     relaxed.from_primary = False
-    score_all([primary, relaxed], "三体")
+    score_all([primary, relaxed], "三体 4K HDR")
     assert relaxed.score < primary.score
 
 
@@ -294,9 +294,9 @@ def test_multi_source_bonus():
     one = _make("1AAA", Status.ALIVE)
     many = build_resources(
         [
-            hit("https://pan.baidu.com/s/1BBB", pwd="abcd", title="三体 全集", kind="pansou"),
-            hit("https://pan.baidu.com/s/1BBB", pwd="abcd", title="三体 全集", kind="tg"),
-            hit("https://pan.baidu.com/s/1BBB", pwd="abcd", title="三体 全集", kind="websearch"),
+            hit("https://pan.baidu.com/s/1BBB", pwd="abcd", title="三体 全集", source="pansou", kind="pansou"),
+            hit("https://pan.baidu.com/s/1BBB", pwd="abcd", title="三体 全集", source="tg:a", kind="tg"),
+            hit("https://pan.baidu.com/s/1BBB", pwd="abcd", title="三体 全集", source="web", kind="websearch"),
         ]
     )[0]
     many.verify = VerifyResult(status=Status.ALIVE)

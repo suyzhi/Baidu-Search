@@ -26,7 +26,7 @@ from ..extract import extract_from_text, html_to_text
 from ..models import RawHit
 from ..normalize import URL_RE
 from ..util import RateLimiter
-from .base import Adapter, register
+from .base import Adapter, publish_hits, register
 
 DEFAULT_ENGINES = {
     # 实测（2026-09）可用性：
@@ -169,6 +169,7 @@ class WebSearchAdapter(Adapter):
 
         hits = extract_from_text(html_to_text(resp.text), source=engine, kind="websearch", origin=url)
         hits += extract_from_text(resp.text, source=engine, kind="websearch", origin=url)
+        publish_hits(hits)
         pages = self._candidate_pages(resp.text)
         return hits, pages
 
@@ -215,9 +216,9 @@ class WebSearchAdapter(Adapter):
             if resp.status_code != 200:
                 return []
             text = html_to_text(resp.text)
-            return extract_from_text(text, source="page", kind="forum", origin=page) + extract_from_text(
+            return publish_hits(extract_from_text(text, source="page", kind="forum", origin=page) + extract_from_text(
                 resp.text, source="page", kind="forum", origin=page
-            )
+            ))
 
         results = await asyncio.gather(*(one(p) for p in pages), return_exceptions=True)
         out: list[RawHit] = []

@@ -266,8 +266,9 @@ class VerifierPool:
         self.cfg = vcfg
         ttl = float(vcfg.get("cache_ttl_hours") or 6)
         self.cache = cache if cache is not None else VerifyCache(ttl_hours=ttl)
+        self._owns_cache = cache is None
         self.timeout = float(vcfg.get("timeout") or 20)
-        self.retries = int(vcfg.get("retries") or 2)
+        self.retries = max(0, int(vcfg.get("retries", 2)))
         self.sem = asyncio.Semaphore(int(vcfg.get("concurrency") or 8))
         self.baidu = BaiduVerifier(cfg=vcfg, cache=self.cache)
 
@@ -304,6 +305,8 @@ class VerifierPool:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+        if self._owns_cache:
+            self.cache.close()
 
     # ---- 能力查询 ----
     def supports(self, pan_type: PanType) -> bool:
@@ -351,6 +354,17 @@ class VerifierPool:
         return bool(result.method and result.method.startswith("cache"))
 
     # ---- 单个资源 ----
+    def cached_result(self, res: Resource) -> VerifyResult | None:
+        key = res.surl if res.pan_type is PanType.BAIDU else res.key
+        return self.cache.get(key, res.pwd) if key else None
+
+    def _apply_cached(self, res: Resource, result: VerifyResult) -> None:
+        res.verify = result
+        if result.title_hint and not res.title:
+            res.title = result.title_hint
+        self._tally(result.status, cached=True)
+        self._bump(res.pan_type.value, result.status)
+
     async def verify(self, res: Resource, *, use_cache: bool = True) -> VerifyResult:
         if res.pan_type is PanType.DIRECT:
             # API 直链（arXiv / Crossref / OpenAlex / MangaDex 等）是接口**直接返回**的，
@@ -382,9 +396,7 @@ class VerifierPool:
         if use_cache:
             hit = self.cache.get(res.key, res.pwd)
             if hit is not None:
-                self._tally(hit.status, cached=True)
-                self._bump(service.name, hit.status)
-                res.verify = hit
+                self._apply_cached(res, hit)
                 return hit
 
         assert self._client is not None, "VerifierPool 必须在 async with 中使用"
@@ -413,8 +425,40 @@ class VerifierPool:
         return result
 
     # ---- 批量 ----
-    async def verify_all(self, resources: list[Resource]) -> None:
-        await asyncio.gather(*(self.verify(r) for r in resources), return_exceptions=True)
+    async def verify_all(self, resources: list[Resource], *, budget: int = 0) -> None:
+        """预算只计未缓存的联网校验；先恢复全部缓存，再处理按相关性排好的候选。"""
+        pending: list[Resource] = []
+        for res in resources:
+            if not self.supports(res.pan_type):
+                await self.verify(res)  # API 直链与不支持验活的类型无需网络。
+                continue
+            cached = self.cached_result(res)
+            if cached is not None:
+                self._apply_cached(res, cached)
+            else:
+                pending.append(res)
+        self.stats["budget_skipped"] = 0
+        self.stats["timeout_skipped"] = 0
+        if budget > 0:
+            skipped, pending = pending[budget:], pending[:budget]
+            self.stats["budget_skipped"] = len(skipped)
+            for res in skipped:
+                res.verify = VerifyResult(status=Status.UNCHECKED,
+                    note=f"超出验活预算（最多新增 {budget} 次联网校验）")
+        deadline = float(self.cfg.get("deadline", 8.0)) if budget > 0 else 0
+        jobs = asyncio.gather(*(self.verify(r, use_cache=False) for r in pending),
+                              return_exceptions=True)
+        try:
+            if deadline > 0:
+                await asyncio.wait_for(jobs, timeout=deadline)
+            else:
+                await jobs
+        except asyncio.TimeoutError:
+            for res in pending:
+                if res.verify is None:
+                    self.stats["timeout_skipped"] += 1
+                    res.verify = VerifyResult(status=Status.UNCHECKED,
+                        note=f"验活等待超过 {deadline:g} 秒，保留结果供后续校验")
         for res in resources:
             if res.verify is None:
                 res.verify = VerifyResult(status=Status.UNKNOWN, method="error",

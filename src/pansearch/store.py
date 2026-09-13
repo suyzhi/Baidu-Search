@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS verify_cache (
     method       TEXT,
     note         TEXT,
     checked_at   REAL NOT NULL,
-    pwd_verified INTEGER NOT NULL DEFAULT 0
+    pwd_verified INTEGER NOT NULL DEFAULT 0,
+    title_hint   TEXT
 );
 CREATE TABLE IF NOT EXISTS search_log (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,6 +55,8 @@ class VerifyCache:
             self.conn.execute(
                 "ALTER TABLE verify_cache ADD COLUMN pwd_verified INTEGER NOT NULL DEFAULT 0"
             )
+        if "title_hint" not in cols:
+            self.conn.execute("ALTER TABLE verify_cache ADD COLUMN title_hint TEXT")
 
     @staticmethod
     def make_key(surl: str, pwd: str | None = None) -> str:
@@ -62,13 +65,13 @@ class VerifyCache:
 
     def get(self, surl: str, pwd: str | None = None) -> VerifyResult | None:
         row = self.conn.execute(
-            "SELECT status, errno, method, note, checked_at, pwd_verified"
+            "SELECT status, errno, method, note, checked_at, pwd_verified, title_hint"
             " FROM verify_cache WHERE surl = ?",
             (self.make_key(surl, pwd),),
         ).fetchone()
         if not row:
             return None
-        status, errno, method, note, checked_at, pwd_verified = row
+        status, errno, method, note, checked_at, pwd_verified, title_hint = row
         if self.ttl > 0 and time.time() - checked_at > self.ttl:
             return None
         try:
@@ -82,13 +85,14 @@ class VerifyCache:
             note=note,
             checked_at=_dt(checked_at),
             pwd_verified=bool(pwd_verified),
+            title_hint=title_hint,
         )
 
     def put(self, surl: str, result: VerifyResult, pwd: str | None = None) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO verify_cache"
-            " (surl, status, errno, method, note, checked_at, pwd_verified)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            " (surl, status, errno, method, note, checked_at, pwd_verified, title_hint)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 self.make_key(surl, pwd),
                 result.status.value,
@@ -97,6 +101,7 @@ class VerifyCache:
                 result.note,
                 time.time(),
                 1 if result.pwd_verified else 0,
+                result.title_hint,
             ),
         )
         self.conn.commit()

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from .models import PanType, RawHit, Resource
-from .normalize import detect_pan_type, normalize_url, parse_baidu, resource_key
+from .normalize import detect_pan_type, normalize_url, parse_baidu, pwd_from_url, resource_key
 
 
 def _pick_longer(a: str | None, b: str | None) -> str | None:
@@ -16,11 +16,19 @@ def _pick_longer(a: str | None, b: str | None) -> str | None:
     return a if len(a) >= len(b) else b
 
 
+def _rrf(rank: int | None) -> float:
+    """Reciprocal Rank Fusion 的单路贡献；无名次（来源不提供排序）时不计。"""
+    if rank is None or rank < 0:
+        return 0.0
+    return 1.0 / (60.0 + rank)
+
+
 def build_resources(hits: Iterable[RawHit]) -> list[Resource]:
     """按分享指纹合并，保留全部来源信息。"""
     buckets: dict[str, Resource] = {}
 
     for hit in hits:
+        pwd = hit.pwd or pwd_from_url(hit.url)
         pan_type = detect_pan_type(hit.url)
         if pan_type is PanType.OTHER:
             continue
@@ -36,10 +44,11 @@ def build_resources(hits: Iterable[RawHit]) -> list[Resource]:
             buckets[key] = Resource(
                 key=key,
                 pan_type=pan_type,
-                url=normalize_url(pan_type, hit.url, surl, hit.pwd),
+                url=normalize_url(pan_type, hit.url, surl, pwd),
                 surl=surl,
-                pwd=hit.pwd,
+                pwd=pwd,
                 title=hit.title,
+                titles=[hit.title] if hit.title else [],
                 size=hit.size,
                 shared_at=hit.shared_at,
                 sources=[hit.source],
@@ -53,17 +62,22 @@ def build_resources(hits: Iterable[RawHit]) -> list[Resource]:
                 # 「侵略机器 War Machine」靠单独命中 "machine" 拿到 rel=0.95，
                 # 把真正的机器学习结果压到第 6 名。
                 queries=[hit.query] if (hit.query and not hit.relaxed) else [],
+                rrf=_rrf(hit.rank),
             )
             continue
 
         # 合并
         res.hit_count += 1
+        res.rrf += _rrf(hit.rank)
         if hit.query and not hit.relaxed and hit.query not in res.queries:
             res.queries.append(hit.query)
         if not hit.relaxed:
             res.from_primary = True
-        if hit.pwd and not res.pwd:
-            res.pwd = hit.pwd
+        if pwd and not res.pwd:
+            res.pwd = pwd
+            res.url = normalize_url(pan_type, hit.url, surl, pwd)
+        if hit.title and hit.title not in res.titles:
+            res.titles.append(hit.title)
         res.title = _pick_longer(res.title, hit.title)
         if hit.size and not res.size:
             res.size = hit.size

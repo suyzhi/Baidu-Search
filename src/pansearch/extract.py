@@ -7,6 +7,7 @@ import re
 from datetime import datetime
 
 from .models import PanType, RawHit
+from .query import query_terms, subject_terms
 from .normalize import (
     BARE_PWD_RE,
     MAGNET_RE,
@@ -37,7 +38,7 @@ def excerpt(text: str | None, keyword: str | None, width: int = 90) -> str:
     if len(flat) <= width:
         return flat
 
-    terms = [t for t in _TERM_SPLIT.split(keyword or "") if t]
+    terms = subject_terms(keyword or "") or query_terms(keyword or "")
     # 按查询顺序找：第一个词是主题词，优先用它定位。
     # 不能取"最早出现"的那个词 —— 「沙丘 2」的 "2" 会在 "2026" 里就命中，
     # 结果又把片段拉回开头，等于没修。

@@ -110,6 +110,10 @@ def _summary(outcome, resources: list[Resource]) -> Panel:
         lines.append(
             f"[dim]原始查询召回不足，已自动补搜：{'、'.join(outcome.queries_used[1:])}[/dim]"
         )
+    if outcome.irrelevant_pruned:
+        lines.append(f"已过滤明确无关结果 {outcome.irrelevant_pruned} 条")
+    if outcome.verify_timeout_skipped:
+        lines.append(f"验活等待已结束，保留 {outcome.verify_timeout_skipped} 条未校验结果")
     if vstats:
         pruned = outcome.pruned
         lines.append(
@@ -140,6 +144,13 @@ def _summary(outcome, resources: list[Resource]) -> Panel:
                 f"（迅雷/UC/123/PikPak/磁力），它们**未经验证**，可能已失效；"
                 f"加 --strict 可一并剔除[/yellow]"
             )
+    if outcome.degraded:
+        lines.append(
+            f"[bold yellow]⚠ 召回降级：{'、'.join(outcome.degraded)} 失败/超时，"
+            f"本次结果可能不全[/bold yellow]"
+        )
+    if getattr(outcome, "from_cache", False):
+        lines.append("[dim]（来自查询缓存，结果与上一次同词搜索一致）[/dim]")
     if outcome.errors:
         for name, err in outcome.errors.items():
             lines.append(f"[yellow]⚠ {name} 失败：{_truncate(err, 120)}[/yellow]")
@@ -328,6 +339,30 @@ def index_crawl(
     )
 
 
+@index_app.command("build-fts")
+def index_build_fts() -> None:
+    """建立/重建 FTS5 全文索引（CJK bigram）。
+
+    一次性迁移：把 62 万条消息编码成 bigram 写进 FTS5，之后检索走倒排索引 +
+    BM25（毫秒级、真 IDF），新消息由触发器增量维护。旧库在完成前会继续用
+    `LIKE` 回退，不会影响使用。
+    """
+    from .tgindex import TgIndex
+
+    index = TgIndex()
+    try:
+        if index.fts_ready():
+            console.print("[cyan]FTS 索引已存在，将重建以纳入全部历史消息…[/cyan]")
+        with console.status("[cyan]正在回填 tokens 并重建倒排索引（需要一两分钟）…[/cyan]"):
+            info = index.build_fts()
+    finally:
+        index.close()
+    console.print(
+        f"[green]完成[/green]：已索引 {info['fts_docs']} 条含链接的消息；"
+        f"检索现在走 BM25（可用 pansearch index stats 复核）"
+    )
+
+
 @index_app.command("stats")
 def index_stats() -> None:
     """查看 TG 索引覆盖情况。"""
@@ -337,6 +372,7 @@ def index_stats() -> None:
     try:
         info = index.stats()
         rows = index.channel_rows()
+        fts_ready = index.fts_ready()
     finally:
         index.close()
 
@@ -346,6 +382,7 @@ def index_stats() -> None:
             f"已索引消息 [bold]{info['messages']}[/bold] 条"
             f"（其中 [bold]{info['messages_with_links']}[/bold] 条含网盘链接）\n"
             f"有数据的频道 [bold]{info['channels_indexed']}[/bold] / {total_channels}\n"
+            f"FTS5 全文索引：{'[green]已建[/green]' if fts_ready else '[yellow]未建[/yellow]（运行 pansearch index build-fts）'}\n"
             f"数据库：{info['db']}",
             title="TG 索引",
             border_style="cyan",

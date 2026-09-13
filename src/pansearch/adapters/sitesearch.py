@@ -25,9 +25,10 @@ import httpx
 
 from ..extract import extract_from_text, html_to_text, page_title
 from ..models import RawHit
+from ..query import query_terms
 from ..routing import GENERAL_VERTICAL, classify
 from ..sitecatalog import SiteEntry, SiteHealth, extract_detail_urls, load_catalog
-from .base import Adapter, register
+from .base import Adapter, publish_hits, register
 
 UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -181,6 +182,7 @@ class SiteSearchAdapter(Adapter):
 
         # 阶段 1：直接命中（搜索页偶尔就带网盘/磁力链接）+ 挑详情页
         hits = extract_from_text(resp.text, source=f"site:{name}", kind="forum", origin=url)
+        publish_hits(hits)
         pages = self._pick_pages(resp.text, result_re, url)
 
         # 阶段 2：跟进详情页
@@ -200,7 +202,7 @@ class SiteSearchAdapter(Adapter):
         if not title:
             return False
         low = title.lower()
-        terms = [t for t in re.split(r"[\s,，、/|·]+", (kw or "").strip().lower()) if t]
+        terms = query_terms(kw)     # 先去标点，否则「《三体》」这类查询永远过不了闸门
         return any(t in low for t in terms)
 
     async def _fetch_pages(self, pages: list[str], name: str, kw: str,
@@ -208,7 +210,7 @@ class SiteSearchAdapter(Adapter):
         # 候选排序：**URL slug 里含查询词的排前面**。
         # 实测 audioz 的 ?s=Serum 会先返回一堆 Kontakt/Roland 页面（它把"最新"
         # 也混进结果），真正的 Serum 帖子排在后面，候选位会被垃圾占满。
-        terms = [t for t in re.split(r"[\s,，、/|·]+", (kw or "").strip().lower()) if t]
+        terms = query_terms(kw)
 
         def slug_rank(url: str) -> int:
             low = url.lower()
@@ -232,12 +234,13 @@ class SiteSearchAdapter(Adapter):
                     return None
             if resp.status_code != 200:
                 return None
-            if not self._relevant(page_title(resp.text), kw):
-                return None
             text = html_to_text(resp.text)
-            return (
-                extract_from_text(text, source=f"site:{name}", kind="forum", origin=page)
-                + extract_from_text(resp.text, source=f"site:{name}", kind="forum", origin=page)
+            title = page_title(resp.text)
+            if not self._relevant(title or text, kw):
+                return None
+            return publish_hits(
+                extract_from_text(text, source=f"site:{name}", kind="forum", origin=page, title=title)
+                + extract_from_text(resp.text, source=f"site:{name}", kind="forum", origin=page, title=title)
             )
 
         # 分批抓、够了就停：一次性 gather 全部候选会让慢站一直等到最后，

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import re
+import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 import httpx
@@ -14,10 +15,12 @@ from .adapters import pansou as _pansou  # noqa: F401  触发注册
 from .adapters import sitesearch as _sitesearch  # noqa: F401  触发注册
 from .adapters import telegram as _telegram  # noqa: F401  触发注册
 from .adapters import websearch as _websearch  # noqa: F401  触发注册
+from .adapters.base import partial_hits
 from .config import alias_config, sources_config, verify_cfg
 from .dedupe import build_resources
-from .models import PanType, RawHit, Resource, Status, VerifyResult
-from .score import score_all, sort_resources
+from .models import PanType, RawHit, Resource
+from .query import MODIFIERS, normalize_text, split_query
+from .score import confidently_irrelevant, score_all, sort_resources
 from .verifiers import VerifierPool, prune
 
 UA = (
@@ -25,7 +28,7 @@ UA = (
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
-_TERM_SPLIT = re.compile(r"[\s,，、/|·]+")
+# 查询切词统一走 query.split_query / query_terms（见 query.py），这里不再自建正则。
 
 # 补搜词的最小长度：单字符没有区分度
 MIN_RELAX_TERM_LEN = 2
@@ -43,7 +46,7 @@ def _usable_relaxed_term(term: str) -> bool:
         return False
     if not any(ch.isalnum() for ch in t):   # 纯符号
         return False
-    if t.isdigit():                          # "2" / "2024" 这类纯数字
+    if t.isdigit() or normalize_text(t) in MODIFIERS:
         return False
     return True
 
@@ -52,10 +55,9 @@ def relaxed_queries(kw: str) -> list[str]:
     """从多词查询派生放宽查询。
 
     PanSou 这类聚合引擎对多词查询召回很差：实测「沙丘 4K HDR」只有 3 条，
-    而「沙丘」有 180+ 条。所以主查询之余补搜主词与限定词 —— 但要过滤掉
-    "2"、"2024" 这种毫无区分度的词（见 _usable_relaxed_term）。
+    而「沙丘」有 180+ 条。所以补搜有区分度的词，跳过纯画质、格式和数字。
     """
-    parts = [p for p in _TERM_SPLIT.split(kw.strip()) if p]
+    parts = split_query(kw)
     if len(parts) < 2:
         return []
 
@@ -78,9 +80,17 @@ class SearchOutcome:
     pruned: int = 0
     strict: bool = False
     verify_budget_skipped: int = 0
+    verify_timeout_skipped: int = 0
+    irrelevant_pruned: int = 0
     used_sources: list[str] = field(default_factory=list)
     queries_used: list[str] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)
+    # 每个数据源的状态/耗时/产出；degraded 是失败、超时或部分失败的源。
+    # 有了它，"结果少"才能区分成"确实没有"还是"某个源挂了"—— 不允许静默降级。
+    source_report: dict[str, dict] = field(default_factory=dict)
+    degraded: list[str] = field(default_factory=list)
+    # 本次结果是否来自查询级缓存（重复搜索稳定、且省掉一次全网抓取）
+    from_cache: bool = False
     verify_stats: dict = field(default_factory=dict)
     # 分阶段耗时（秒）。只靠"总耗时"没法判断该优化哪一段 ——
     # 实测多次以为瓶颈在验活，实际在抓取阶段。
@@ -122,7 +132,8 @@ def alias_queries(kw: str) -> list[str]:
     aliases = alias_config()
     if not aliases:
         return []
-    low = kw.strip().lower()
+    # 先去标点再匹配/替换：「《大气合成器》」「大气合成器!」这类也要能命中别名。
+    low = " ".join(split_query(kw)).casefold()
     out: list[str] = []
     for alias, targets in aliases.items():
         a = str(alias).strip().lower()
@@ -135,9 +146,53 @@ def alias_queries(kw: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+_STATUS_RANK = {"ok": 0, "empty": 1, "degraded": 2, "timeout": 3, "error": 4}
+
+# 查询级缓存：同一关键词 + 同一组参数在 TTL 内直接复用整份结果。
+# 意义不是省 CPU，而是**一致性** —— 同一个搜索不会因为某次网络抖动给出不同的答案，
+# 这也是"可靠"最容易被用户感知的一面。进程内、容量有限、命中返回深拷贝（防串改）。
+_QUERY_CACHE: dict[str, tuple[float, "SearchOutcome"]] = {}
+_QUERY_CACHE_MAX = 64
+
+
+def clear_query_cache() -> None:
+    _QUERY_CACHE.clear()
+
+
+def _query_cache_key(kw, types, source_names, do_verify, alive_only, strict, relax,
+                     verify_budget) -> str:
+    return "|".join([
+        kw,
+        ",".join(sorted(t.value for t in (types or []))),
+        ",".join(sorted(source_names or [])),
+        str(bool(do_verify)), str(bool(alive_only)), str(bool(strict)), str(bool(relax)),
+        str(verify_budget),
+    ])
+
+
+def _merge_report(acc: dict[str, dict], rep: dict[str, dict]) -> None:
+    """把一次查询的源状态并入总表：累计产出、取最大耗时、取最差状态。
+
+    只要拿到了结果，最差也只能是 degraded —— 一次补搜超时不该让主力源显示成"挂了"。
+    """
+    for name, r in rep.items():
+        cur = acc.get(name)
+        if cur is None:
+            acc[name] = dict(r)
+            continue
+        cur["hits"] += r["hits"]
+        cur["seconds"] = round(max(cur["seconds"], r["seconds"]), 2)
+        if _STATUS_RANK[r["status"]] > _STATUS_RANK.get(cur["status"], 0):
+            cur["status"] = r["status"]
+        if r.get("error") and not cur.get("error"):
+            cur["error"] = r["error"]
+        if cur["hits"] > 0 and cur["status"] in ("error", "timeout"):
+            cur["status"] = "degraded"
+
+
 async def _fetch_hits(
     adapters, client: httpx.AsyncClient, query: str, *, deadline: float | None = None
-) -> tuple[list[RawHit], dict[str, str]]:
+) -> tuple[list[RawHit], dict[str, str], dict[str, dict]]:
     """并发打所有数据源，**每个源有自己的截止时间**，超时就跳过。
 
     实测各源耗时差异极大（TG 本地索引 0.0s / PanSou 8~25s / Brave 15~22s）。
@@ -146,26 +201,59 @@ async def _fetch_hits(
     """
     default = float(deadline or sources_config().get("fetch_deadline") or 15.0)
 
-    async def one(adapter) -> list[RawHit]:
+    async def one(adapter) -> tuple[list[RawHit], str | None, float]:
         limit = float(adapter.cfg.get("deadline") or default)
+        collected: list[RawHit] = []
+        token = partial_hits.set(collected)
+        got: list[RawHit] | None = None
+        t0 = time.monotonic()
         try:
-            return await asyncio.wait_for(adapter.search(query, client), timeout=limit)
+            got = await asyncio.wait_for(adapter.search(query, client), timeout=limit)
+            error = None
         except asyncio.TimeoutError:
-            raise RuntimeError(f"超时（>{limit:.0f}s），已跳过") from None
+            got, error = collected, f"超时（>{limit:g}s），保留已取得的 {len(collected)} 条命中"
+        except Exception as exc:
+            got, error = collected, f"{type(exc).__name__}: {exc}"
+        finally:
+            partial_hits.reset(token)
+        # 记录**该来源内部**的名次，供 RRF 多源融合使用（来源不排序则名次无意义，
+        # 但代价只是一个整数，不影响既有打分）。
+        for i, hit in enumerate(got):
+            try:
+                hit.rank = i
+            except (AttributeError, ValueError):
+                pass
+        return got, error, time.monotonic() - t0
 
     results = await asyncio.gather(*(one(a) for a in adapters), return_exceptions=True)
 
     hits: list[RawHit] = []
     errors: dict[str, str] = {}
+    report: dict[str, dict] = {}
     for adapter, result in zip(adapters, results):
         if isinstance(result, BaseException):
             errors[adapter.name] = (
                 str(result) if isinstance(result, RuntimeError)
                 else f"{type(result).__name__}: {result}"
             )
+            report[adapter.name] = {"status": "error", "hits": 0, "seconds": 0.0,
+                                    "error": errors[adapter.name]}
+            continue
+        got, error, secs = result
+        hits.extend(got)
+        if error:
+            errors[adapter.name] = error
+        if error and not got:
+            status = "timeout" if "超时" in error else "error"
+        elif error:
+            status = "degraded"          # 部分成功：拿到了结果，但源本身报错/超时
+        elif got:
+            status = "ok"
         else:
-            hits.extend(result)
-    return hits, errors
+            status = "empty"
+        report[adapter.name] = {"status": status, "hits": len(got),
+                                "seconds": round(secs, 2), "error": error}
+    return hits, errors, report
 
 
 async def search(
@@ -181,14 +269,33 @@ async def search(
     limit: int | None = None,
 ) -> SearchOutcome:
     kw = kw.strip()
+    # 发给各源的是"干净检索词"：用户常把标题原样粘进来（“三体”、"三体"、《三体》全集、三体!），
+    # 标点留在检索词里会让每个源的子串/LIKE 匹配都 0 命中 —— 表现为"搜什么都搜不到"。
+    # 展示与打分仍用用户原词（打分内部同样会做规范化）。
+    query_kw = " ".join(split_query(kw)) or kw
     adapters = build_adapters(source_names)
     outcome = SearchOutcome(keyword=kw, used_sources=[a.name for a in adapters])
-    outcome.queries_used = [kw]
+    outcome.queries_used = [query_kw]
     outcome.strict = strict
+
+    if not kw:
+        return outcome
 
     if not adapters:
         outcome.errors["_"] = "没有启用的数据源，请检查 config/sources.yaml"
         return outcome
+
+    # ---- 查询级缓存：命中即返回整份结果（含验活状态），保证重复搜索一致 ----
+    cache_ttl = float(sources_config().get("search_cache_ttl_seconds") or 0)
+    cache_key = None
+    if cache_ttl > 0 and not limit:
+        cache_key = _query_cache_key(kw, types, source_names, do_verify, alive_only,
+                                     strict, relax, verify_budget)
+        hit = _QUERY_CACHE.get(cache_key)
+        if hit and time.monotonic() - hit[0] <= cache_ttl:
+            cached = deepcopy(hit[1])
+            cached.from_cache = True
+            return cached
 
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(30.0, connect=10.0),
@@ -202,15 +309,15 @@ async def search(
         # 主查询 / 补搜 / 别名替换 一起并行发出：
         #   补搜（relaxed=True）要降权 —— 它是放宽，召回多但精准度低
         #   别名（relaxed=False）不降权 —— 它是等价替换，命中结果按替换后的词打分
-        plan: list[tuple[str, bool]] = [(kw, False)]
+        plan: list[tuple[str, bool]] = [(query_kw, False)]
         if relax:
             plan += [(q, True) for q in relaxed_queries(kw)]
             plan += [(q, False) for q in alias_queries(kw)]
+        plan = list(dict.fromkeys(plan))
         batches = await asyncio.gather(
             *(
                 _fetch_hits(
-                    [a for a in adapters if not (a.primary_only and is_relaxed)]
-                    or adapters,
+                    [a for a in adapters if not (a.primary_only and is_relaxed)],
                     client, q,
                 )
                 for q, is_relaxed in plan
@@ -224,17 +331,21 @@ async def search(
             if isinstance(batch, BaseException):
                 outcome.errors.setdefault("_", f"{type(batch).__name__}: {batch}")
                 continue
-            got, errs = batch
+            got, errs, rep = batch
             for name, err in errs.items():
                 outcome.errors.setdefault(name, err)
-            for hit in got:
-                hit.relaxed = is_relaxed
-                hit.query = query
-            if query != kw and got:
+            _merge_report(outcome.source_report, rep)
+            # 适配器可能返回复用对象；不能互相覆盖主查询/别名的身份。
+            got = [hit.model_copy(update={"relaxed": is_relaxed, "query": query}) for hit in got]
+            if query != query_kw and got:
                 outcome.queries_used.append(query)
             hits.extend(got)
 
         outcome.raw_hits = len(hits)
+        outcome.degraded = sorted(
+            name for name, r in outcome.source_report.items()
+            if r["status"] in ("error", "timeout", "degraded")
+        )
 
         resources = build_resources(hits)
         outcome.dedup_count = len(resources)
@@ -243,35 +354,37 @@ async def search(
             allowed = set(types)
             resources = [r for r in resources if r.pan_type in allowed]
 
+        # 等价别名适用于所有来源，即使这个源是用原词召回的。
+        equivalents = [q for q, relaxed in plan if not relaxed]
+        for res in resources:
+            res.queries = list(dict.fromkeys([*res.queries, *equivalents]))
+        score_all(resources, kw)
+        if alive_only:
+            kept = [r for r in resources if not confidently_irrelevant(r, kw)]
+            outcome.irrelevant_pruned = len(resources) - len(kept)
+            resources = kept
+
         if do_verify and resources:
             # ---- 验活预算：先按相关性排序，只验活最相关的前 N 条 ----
             # 大结果集（700+）全量验活要 1~2 分钟，而用户只看前几十条。
             budget = verify_budget if verify_budget is not None else verify_cfg().get("budget", 300)
             budget = int(budget or 0)
-            if budget > 0 and len(resources) > budget:
-                score_all(resources, kw)
-                resources.sort(key=lambda r: -r.score)
-                head, tail = resources[:budget], resources[budget:]
-                outcome.verify_budget_skipped = len(tail)
-                for res in tail:
-                    res.verify = VerifyResult(
-                        status=Status.UNCHECKED,
-                        note=f"超出验活预算（仅验活最相关的前 {budget} 条）",
-                    )
-                resources = head
-            else:
-                tail = []
+            resources.sort(key=lambda r: (-r.relevance, -r.score))
 
             async with VerifierPool() as pool:
-                await pool.verify_all(resources)
+                await pool.verify_all(resources, budget=budget)
                 outcome.verify_stats = dict(pool.stats)
-            resources = resources + tail
+                outcome.verify_budget_skipped = pool.stats.get("budget_skipped", 0)
+                outcome.verify_timeout_skipped = pool.stats.get("timeout_skipped", 0)
     outcome.timings["verify"] = _time.monotonic() - _t_start - outcome.timings.get("fetch", 0.0)
 
     score_all(resources, kw)
     resources = sort_resources(resources)
 
     if alive_only:
+        kept = [r for r in resources if not confidently_irrelevant(r, kw)]
+        outcome.irrelevant_pruned += len(resources) - len(kept)
+        resources = kept
         # 剔除失效链接：验活过的按状态剔除；不支持验活的网盘默认保留
         resources, outcome.pruned = prune(resources, strict=strict)
 
@@ -279,4 +392,12 @@ async def search(
         resources = resources[:limit]
 
     outcome.resources = resources
+
+    # 只在"有结果"或"没有源降级"时缓存 —— 一次源故障导致的空结果必须允许重试，
+    # 不能被缓存成"确实没有"。
+    if cache_key and (resources or not outcome.degraded):
+        _QUERY_CACHE[cache_key] = (time.monotonic(), deepcopy(outcome))
+        if len(_QUERY_CACHE) > _QUERY_CACHE_MAX:
+            oldest = min(_QUERY_CACHE, key=lambda k: _QUERY_CACHE[k][0])
+            _QUERY_CACHE.pop(oldest, None)
     return outcome

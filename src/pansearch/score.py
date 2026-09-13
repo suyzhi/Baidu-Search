@@ -8,8 +8,37 @@ from datetime import datetime, timezone
 
 from .config import pan_priority, scoring_cfg
 from .models import PanType, Resource, Status
+from .query import normalize_text, query_terms, subject_terms, term_present
+from .textindex import term_idf
 
-_TERM_SPLIT = re.compile(r"[\s,，、/|·]+")
+
+def _pick_anchor(subjects: list[str]) -> str:
+    """多主题词时选"锚点"：**IDF 最高**的那个（最稀有的词最能界定主题）。
+
+    实测反例：「Serum 合成器」里"合成器"也会被当成主题词，于是标题只要出现
+    "合成器"（音乐类帖子到处都是）就算相关，前排全是不相关的专辑。
+    按 IDF 选锚点后锚点变成罕见的 "serum"，只命中"合成器"的结果直接沉底。
+    拿不到 IDF 统计（索引未建 / 词不在语料里）时退回第一个词。
+    """
+    if not subjects:
+        return ""
+    if len(subjects) == 1:
+        return subjects[0]
+    best, best_w = subjects[0], 0.0
+    for t in subjects:
+        w = term_idf(t)
+        if w is not None and w > best_w:
+            best, best_w = t, w
+    return best
+
+
+def anchor_term(kw: str) -> str:
+    """查询的锚点主题词：没有内容词时退回第一个查询词。"""
+    subjects = subject_terms(kw)
+    if subjects:
+        return _pick_anchor(subjects)
+    terms = query_terms(kw)
+    return terms[0] if terms else ""
 
 
 def _matched_terms(title: str, terms: list[str]) -> int:
@@ -24,14 +53,14 @@ def _matched_terms(title: str, terms: list[str]) -> int:
     for i, term in enumerate(terms):
         if term.isdigit() and i > 0:
             prev = terms[i - 1]
-            if f"{prev}{term}" in title or f"{prev} {term}" in title:
+            if re.search(re.escape(prev) + r"[\s:：._-]*" + re.escape(term) + r"(?!\d)", title):
                 matched += 1
-        elif term in title:
+        elif term_present(title, term):
             matched += 1
     return matched
 
 
-def _relevance_single(res: Resource, kw: str) -> float:
+def _relevance_single(res: Resource, kw: str, *, title: str | None = None) -> float:
     """多词查询按「命中词数比例」打分，并**特殊对待第一个词**。
 
     中文没有分词，所以 "沙丘 4K HDR" 要拆成词分别匹配。
@@ -39,19 +68,24 @@ def _relevance_single(res: Resource, kw: str) -> float:
     靠百度优先 + 提取码 + 多源命中的连乘能反超真正相关的结果，
     所以查询的第一个词（通常是片名/主题词）缺失必须重罚。
     """
-    k = kw.lower().strip()
+    k = normalize_text(kw)
     if not k:
         return 1.0
-    title = (res.title or "").lower()
+    title = normalize_text(title if title is not None else (res.title or ""))
     if not title:
         return 0.3
 
-    terms = [t for t in _TERM_SPLIT.split(k) if t]
+    terms = query_terms(k)
     if not terms:
         return 1.0
 
     matched = _matched_terms(title, terms)
-    subject_present = terms[0] in title
+    subjects = subject_terms(k)
+    if subjects:
+        # 锚点（最高 IDF 主题词）缺失 = 主题词缺失，不管其他词命中多少
+        subject_present = term_present(title, _pick_anchor(subjects))
+    else:
+        subject_present = any(term_present(title, t) for t in terms)
 
     if matched == len(terms):
         return 1.0 if title.startswith(terms[0]) else 0.95
@@ -67,14 +101,42 @@ def _relevance_single(res: Resource, kw: str) -> float:
 
 
 def _relevance(res: Resource, kw: str) -> float:
-    """相关性取"原词 / 别名 / 补搜词"里最高的那个。
+    """相关性取原词或等价别名的最高值；补搜不能放宽评分标准。
 
     否则别名检索会自相矛盾：用户搜「大气合成器」，我们用别名 "Omnisphere"
     取回一堆标题写着 Omnisphere 的结果，再用「大气合成器」去算相关性
     —— 主题词一个都不出现，全被判成 0.1 分。
     """
     candidates = [kw] + [q for q in (res.queries or []) if q and q != kw]
-    return max(_relevance_single(res, q) for q in candidates)
+    titles = list(dict.fromkeys([res.title or "", *res.titles]))
+    return max(_relevance_single(res, q, title=t) for q in candidates for t in titles)
+
+
+def confidently_irrelevant(res: Resource, kw: str) -> bool:
+    """只过滤有标题、且**锚点主题词**（最高 IDF 的内容词）缺失的结果。
+
+    为什么用锚点而不是"任一主题词"：「Serum 合成器」里"合成器"也是内容词，
+    只看"任一命中"会让一堆只提到"合成器"的音乐帖留下来。锚点 = 最稀有的那个词，
+    它缺失基本就说明不是要找的东西。跨语言标题不认识，保留而不是猜着删。
+    """
+    titles = [normalize_text(t) for t in [res.title, *res.titles] if t and t.strip()]
+    if not titles:
+        return False
+    # 通用文件夹名不足以证明不相关，让验活接口补充信息。
+    if any(not subject_terms(t) or t in {"文件", "文件夹", "未命名", "download", "untitled"}
+           for t in titles):
+        return False
+    anchor = anchor_term(kw)
+    if not anchor:
+        return False
+    # 只有"中文查询 → 非中文标题"才当作可能的翻译保留（例如中文查询返回英文片名）。
+    # 反过来（英文锚点 → 中文标题）不能一律保留，否则「Serum 合成器」会留下一堆
+    # 只提到"合成器"的中文音乐帖。
+    if re.search(r"[\u3400-\u9fff]", anchor) and any(
+        not re.search(r"[\u3400-\u9fff]", t) for t in titles
+    ):
+        return False
+    return not any(term_present(title, anchor) for title in titles)
 
 
 def _kind_weight(res: Resource, cfg: dict) -> float:
@@ -124,8 +186,15 @@ def score_resource(res: Resource, kw: str, cfg: dict | None = None) -> float:
 
     # 多源命中加成（相对提升，封顶 35%）
     bonus = float(cfg.get("multi_source_bonus") or 0.0)
-    if res.hit_count > 1:
-        score *= 1.0 + min(0.35, (res.hit_count - 1) * bonus)
+    source_count = len(set(res.sources))
+    if source_count > 1:
+        score *= 1.0 + min(0.35, (source_count - 1) * bonus)
+
+    # RRF（Reciprocal Rank Fusion）多源融合：Σ 1/(60+rank)。
+    # 比"命中次数"更细 —— 在 TG 的 BM25 序和站点/网页序里都排前面的资源更可信。
+    rrf_bonus = float(cfg.get("rrf_bonus") or 0.0)
+    if rrf_bonus > 0 and res.rrf:
+        score *= 1.0 + min(0.30, rrf_bonus * res.rrf)
 
     # 百度优先 —— **只给能确认可用的链接**。
     # 若不加这个条件：百度 share/verify 被锁（恒返回 -62）时，一堆"确定不了"的
@@ -140,7 +209,7 @@ def score_resource(res: Resource, kw: str, cfg: dict | None = None) -> float:
         score *= 1.1
 
     # 只被"放宽查询"命中的结果降权（保留可发现性，但不淹没主查询结果）
-    if not res.from_primary:
+    if not res.from_primary and _relevance(res, kw) < 0.85:
         score *= float(cfg.get("relaxed_penalty") or 0.5)
 
     return round(score * _status_weight(res, cfg), 6)
@@ -149,12 +218,19 @@ def score_resource(res: Resource, kw: str, cfg: dict | None = None) -> float:
 def score_all(resources: list[Resource], kw: str) -> list[Resource]:
     cfg = scoring_cfg()
     for res in resources:
+        if res.titles:
+            queries = [kw, *res.queries]
+            res.title = max(
+                dict.fromkeys([res.title or "", *res.titles]),
+                key=lambda t: (max(_relevance_single(res, q, title=t) for q in queries), len(t)),
+            ) or None
+        res.relevance = _relevance(res, kw)
         res.score = score_resource(res, kw, cfg)
     return resources
 
 
 def sort_resources(resources: list[Resource], *, alive_first: bool = True) -> list[Resource]:
-    """排序：失效沉底 → 确定性分层 → 分数 → 可确认可用 → 网盘优先级。
+    """排序：失效沉底 → 匹配程度 → 确定性分层 → 分数 → 可用性/网盘优先级。
 
     分层顺序（越靠前越可信）：
       0  确认存活（alive）
@@ -185,6 +261,8 @@ def sort_resources(resources: list[Resource], *, alive_first: bool = True) -> li
         # 避免它们盖过相关性差异
         not_usable = 0 if res.usable else 1
         pan_rank = prio.get(res.pan_type.value, len(prio))
-        return (dead, tier, -res.score, not_usable, pan_rank)
+        # 先比较匹配程度，再在相近结果里比较存活状态。
+        relevance_tier = 0 if res.relevance >= 0.85 else 1 if res.relevance >= 0.45 else 2
+        return (dead, relevance_tier, tier, -res.score, not_usable, pan_rank)
 
     return sorted(resources, key=sort_key)

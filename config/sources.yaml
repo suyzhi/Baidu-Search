@@ -41,7 +41,7 @@ sources:
     enabled: true
     kind: tg
     weight: 0.9
-    auto_index: true          # 索引为空时自动抓最新一页
+    auto_index: true          # 整个索引为空时才抓最新一页；关键词无命中不触发
     max_hits: 400             # 每次检索最多取多少条消息
     crawl_concurrency: 12
     timeout: 20
@@ -78,38 +78,20 @@ sources:
     max_pages: 4            # 每个站最多跟进几个详情页（再多收益很小）
     page_timeout: 12
     page_concurrency: 10
-    # result_re 用来从搜索结果页挑详情页；单引号里 '' 表示一个 '
-    sites:
-      - name: audioz
-        search: "https://audioz.download/?s={q}"
-        # 真帖子形如 /software/300623-download_native-instruments-kontakt-8....html
-        # 别写成 /\d{4}/\d{2}/ —— 那会匹配到归档日期页（/2026/09/01/）
-        result_re: 'https://audioz\.download/[a-z]+/\d+-download_[^"''<>\s]+\.html'
-      - name: looptorrent
-        search: "https://looptorrent.net/?s={q}"
-        result_re: 'https://looptorrent\.net/[a-z0-9][a-z0-9-]{6,}/'
-      - name: 4download
-        search: "https://4download.net/?s={q}"
-        result_re: 'https://4download\.net/[a-z0-9-]{6,}/'
-      - name: vstorrent
-        search: "https://vstorrent.org/?s={q}"
-        result_re: 'https://vstorrent\.org/[a-z0-9-]{6,}/'
-      - name: ghxi
-        search: "https://www.ghxi.com/?s={q}"
-        result_re: 'https://www\.ghxi\.com/[a-z0-9-]+\.html'
-      - name: 423down
-        search: "https://www.423down.com/?s={q}"
-        result_re: 'https://www\.423down\.com/\d+\.html'
-      - name: dayanzai
-        search: "https://www.dayanzai.me/?s={q}"
-        result_re: 'https://www\.dayanzai\.me/[a-z0-9-]+\.html'
+    # 使用 config/sites.yaml 的分类路由；固定列表会绕过路由，搜电影也打软件站。
+    # 临时定向排查时才显式指定列表，日常保持 null。
+    sites: null
 
   # ---- B 环：搜索引擎定向检索（捞聚合站搜不到的"野链接"）----
   # 两阶段：先搜到"资源讨论页"，再抓这些页面抽网盘链接。
   # 实测：绝大多数引擎不索引 pan.baidu.com/s 本身，但索引讨论页 → 必须两阶段。
   # brave 直接命中最多但会 429；so 备用。
   websearch:
-    enabled: true
+    # ⛔ 已关闭：实测（2026-09-13）bing 对 `site:pan.baidu.com/s` 只回"查询回显"、
+    # 没有真实分享链接，ddg 直接 ConnectError；单次 7.7s / 0 条，200 词全量里
+    # 几乎每次都超时。它现在是纯粹的 6 秒成本、零召回 —— 想恢复请先换成
+    # Brave / 自建 SearXNG，再把这个开关打开。
+    enabled: false
     kind: websearch
     weight: 0.6
     timeout: 25
@@ -152,11 +134,12 @@ verify:
   cache_ttl_hours: 6
   timeout: 15
   retries: 1
-  # 验活预算：结果很多时只验活**最相关**的前 N 条（先按相关性排序再验活）。
+  # 验活预算：先恢复全部缓存，只对最相关的 N 条未缓存资源发起联网校验。
   # 验活是冷搜索的瓶颈：255 次真实请求 ≈ 20 秒（夸克限速 10 qps 就占 18 秒）。
   # 而用户通常只看前几十条，所以没必要验活几百条；超出的标记为"未校验"。
   # 设为 0 表示不限制（全量验活，700+ 条要 1~2 分钟）。
   budget: 150
+  deadline: 8               # 有限预算模式最多等待 8 秒；未完成的保留为未校验
   # 各网盘验活的独立限速（覆盖 config/pan_errno.yaml 里的 qps）
   services:
     quark:  {qps: 10.0}
@@ -185,11 +168,19 @@ scoring:
     dead: 0.02
     not_found: 0.0
   multi_source_bonus: 0.12   # 多源命中加成：每多一个来源相对提升 12%（封顶 +35%）
+  # RRF（Reciprocal Rank Fusion）：Σ 1/(60+rank)，多路召回都排前面的资源更可信。
+  # 1.0 = 系数（单来源第 1 名约 +1.7%；三个来源都进前排约 +5%）。
+  rrf_bonus: 1.0
   freshness_halflife_days: 730
   pan_priority_bonus: 0.25   # 百度优先：相对提升 25%（乘法因子，不做排序层级）
-  relaxed_penalty: 0.5       # 只被"放宽查询"命中的结果降权为 50%
+  relaxed_penalty: 0.5       # 只被补搜命中且未完整匹配的结果降权；完整匹配不扣分
   relevance_power: 2.0       # 相关性幂次闸门：把"主题词命中/缺失"的差距拉大，防止被加成翻盘
 
 # 抓取阶段的整体截止时间（秒）：超过就跳过还没返回的数据源。
 # 实测 TG 本地索引 0.0s / PanSou 8~15s / Brave 15~22s —— 不等最慢的那个。
 fetch_deadline: 15
+
+# 查询级缓存：同一关键词 + 同一组参数在 N 秒内复用整份结果。
+# 主要买的是**一致性**（同一搜索不会因网络抖动给出不同答案）和一次全网抓取；
+# 只缓存"有结果"或"没有源降级"的搜索，源故障导致的空结果仍可重试。0 = 关闭。
+search_cache_ttl_seconds: 300

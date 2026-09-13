@@ -98,6 +98,7 @@ class RawHit(BaseModel):
     origin: str | None = None       # 来源页面（可点回原帖）
     relaxed: bool = False           # 是否来自"放宽查询"补搜（用于降权，避免淹没主查询结果）
     query: str | None = None        # 由哪个查询词命中（别名/补搜时用于正确打分）
+    rank: int | None = None         # 同一来源/查询内的名次（RRF 多源融合用）
 
 
 class VerifyResult(BaseModel):
@@ -131,8 +132,13 @@ class Resource(BaseModel):
     hit_count: int = 1
     # 是否由"主查询"命中（False = 只被放宽查询命中）；用于降权，避免补搜结果淹没主结果
     from_primary: bool = True
-    # 命中过这条资源的所有查询词（含别名/补搜），相关性取其中最高的一个
+    # 主查询/等价别名；补搜词不能冒充原始搜索意图。
     queries: list[str] = Field(default_factory=list)
+    titles: list[str] = Field(default_factory=list)  # 去重时保留不同来源的标题证据
+    relevance: float = 0.0
+    # Reciprocal Rank Fusion：Σ 1/(60+rank)。多路召回都排前面的资源更可信，
+    # 比"命中次数"更能反映"多个独立来源都认为它相关"。
+    rrf: float = 0.0
     verify: VerifyResult | None = None
     score: float = 0.0
 

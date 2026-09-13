@@ -35,7 +35,8 @@ class BaiduVerifier:
         self.su_map = errno_map("shorturlinfo")
         self.default = errno_default()
         self.timeout = float(self.cfg.get("timeout") or 20)
-        self.retries = int(self.cfg.get("retries") or 2)
+        self.retries = max(0, int(self.cfg.get("retries", 2)))
+        self._owns_cache = cache is None
         self.cache = cache if cache is not None else VerifyCache(
             ttl_hours=float(self.cfg.get("cache_ttl_hours") or 6)
         )
@@ -43,6 +44,7 @@ class BaiduVerifier:
         self.sem = asyncio.Semaphore(int(self.cfg.get("concurrency") or 4))
         self._client: httpx.AsyncClient | None = None
         self._warmed = False
+        self._warmup_lock = asyncio.Lock()
         self.stats = {"checked": 0, "cache_hit": 0, "alive": 0, "dead": 0, "error": 0}
 
     async def __aenter__(self) -> BaiduVerifier:
@@ -62,16 +64,21 @@ class BaiduVerifier:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+        if self._owns_cache:
+            self.cache.close()
 
     async def _warmup(self) -> None:
         """取一次 BAIDUID 等 Cookie，share/verify 依赖它。"""
         if self._warmed or self._client is None:
             return
-        try:
-            await self._client.get(PAN_ORIGIN + "/")
-        except httpx.HTTPError:
-            pass
-        self._warmed = True
+        async with self._warmup_lock:
+            if self._warmed:
+                return
+            try:
+                await self._client.get(PAN_ORIGIN + "/")
+            except httpx.HTTPError:
+                pass
+            self._warmed = True
 
     @staticmethod
     def _status_from(value: str) -> Status:

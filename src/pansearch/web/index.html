@@ -189,6 +189,8 @@ function render(data, secs){
   parts.push('原始命中 <b>' + data.raw_hits + '</b>');
   parts.push('去重 <b>' + data.dedup_count + '</b>');
   if (data.pruned) parts.push('<span style="color:var(--red)">剔除失效 <b>' + data.pruned + '</b></span>');
+  if (data.irrelevant_pruned) parts.push('过滤无关 <b>' + data.irrelevant_pruned + '</b>');
+  if (data.verify_timeout_skipped) parts.push('待校验 <b>' + data.verify_timeout_skipped + '</b>');
   parts.push('显示 <b>' + data.shown + '</b>');
   parts.push('存活 <b>' + data.alive_count + '</b>');
   const vs = data.verify_stats || {};
@@ -199,6 +201,13 @@ function render(data, secs){
   parts.push('数据源 <b>' + (data.used_sources || []).join(' + ') + '</b>');
 
   let html = parts.join(' ｜ ');
+
+  if ((data.degraded || []).length) {
+    html = '<span style="color:var(--yellow)">⚠ 召回降级：' +
+      data.degraded.map(esc).join('、') + ' 失败/超时，本次结果可能不全</span><br>' + html;
+  } else if (data.from_cache) {
+    html += '<br><span style="color:var(--dim)">（来自查询缓存，与上一次同词搜索一致）</span>';
+  }
 
   const qs = data.queries_used || [];
   if (qs.length > 1) {

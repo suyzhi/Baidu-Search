@@ -17,10 +17,10 @@ from pansearch.pipeline import _fetch_hits, relaxed_queries, search
     "kw,expected",
     [
         # 实测「沙丘 4K HDR」在聚合引擎只有个位数~几十条，「沙丘」有 180+ 条
-        ("沙丘 4K HDR", ["沙丘", "4K HDR"]),
-        ("三体 全集", ["三体", "全集"]),
-        ("Dune 4K", ["Dune", "4K"]),
-        ("沙丘、4K、HDR", ["沙丘", "4K HDR"]),
+        ("沙丘 4K HDR", ["沙丘"]),
+        ("三体 全集", ["三体"]),
+        ("Dune 4K", ["Dune"]),
+        ("沙丘、4K、HDR", ["沙丘"]),
     ],
 )
 def test_relaxed_queries_multiword(kw, expected):
@@ -34,7 +34,7 @@ def test_relaxed_queries_multiword(kw, expected):
         ("沙丘 2", ["沙丘"]),
         ("沙丘 2024", ["沙丘"]),
         ("沙丘、2", ["沙丘"]),
-        ("阿凡达 2 4K", ["阿凡达", "4K"]),
+        ("阿凡达 2 4K", ["阿凡达"]),
         ("2 沙丘", ["沙丘"]),          # 主词无区分度时，只能靠限定词
         ("1 2", []),                  # 全是无区分度的词 -> 不补搜
     ],
@@ -98,7 +98,12 @@ class StubPool:
     async def __aexit__(self, *exc):
         return False
 
-    async def verify_all(self, resources):
+    async def verify_all(self, resources, *, budget=0):
+        if budget > 0:
+            tail, resources = resources[budget:], resources[:budget]
+            self.stats["budget_skipped"] = len(tail)
+            for res in tail:
+                res.verify = VerifyResult(status=Status.UNCHECKED, note="超出验活预算")
         self.seen = len(resources)
         for res in resources:
             res.verify = VerifyResult(status=Status.ALIVE, method="stub")
@@ -171,7 +176,7 @@ async def test_slow_source_is_skipped_not_fatal(monkeypatch):
     slow = StubAdapter({"deadline": 0.05}, delay=5.0)
     fast = StubAdapter({"deadline": 5.0}, _quark_hits(2))
 
-    hits, errors = await _fetch_hits([slow, fast], None, "沙丘")
+    hits, errors, report = await _fetch_hits([slow, fast], None, "沙丘")
 
     assert len(hits) == 2, "快源的结果必须保留"
     assert "超时" in errors["stub"] or errors, "慢源必须被记录为超时"
@@ -182,7 +187,7 @@ async def test_source_error_is_isolated(monkeypatch):
         async def search(self, kw, client):
             raise RuntimeError("站点挂了")
 
-    hits, errors = await _fetch_hits([Boom({}), StubAdapter({}, _quark_hits(3))], None, "沙丘")
+    hits, errors, _ = await _fetch_hits([Boom({}), StubAdapter({}, _quark_hits(3))], None, "沙丘")
     assert len(hits) == 3
     assert "站点挂了" in errors["stub"]
 
@@ -194,7 +199,7 @@ async def test_relaxed_queries_are_all_requested(monkeypatch):
     monkeypatch.setattr(pipeline, "VerifierPool", StubPool)
 
     await search("沙丘 4K HDR", do_verify=True, alive_only=False, relax=True, verify_budget=0)
-    assert adapter.calls == ["沙丘 4K HDR", "沙丘", "4K HDR"]
+    assert adapter.calls == ["沙丘 4K HDR", "沙丘"]
 
 
 async def test_relax_disabled_uses_single_query(monkeypatch):
@@ -259,7 +264,7 @@ async def test_alias_hits_scored_against_alias_word(monkeypatch):
     out = await search("大气合成器", do_verify=True, alive_only=False,
                        relax=True, verify_budget=0)
     res = out.resources[0]
-    assert res.queries == ["omnisphere"]
+    assert "omnisphere" in res.queries
     assert score_resource(res, "大气合成器", scoring_cfg()) > 0.5
 
 

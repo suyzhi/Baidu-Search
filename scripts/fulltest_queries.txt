@@ -1,0 +1,204 @@
+# 200 个跨领域搜索词 —— 全量回归测试语料
+# 格式：每行一个 `领域<TAB>关键词`，用于 scripts/fulltest.py
+# 覆盖：影视/剧集/动漫/漫画/音乐/电子书/课程/软件/游戏/设计/学术/音源制作
+
+movie	沙丘
+movie	沙丘 4K HDR
+movie	沙丘 2
+movie	流浪地球 2 4K
+movie	奥本海默 蓝光原盘
+movie	阿凡达 水之道 2160p
+movie	疯狂的麦克斯 狂暴女神
+movie	哥斯拉大战金刚 2
+movie	银河护卫队 3
+movie	蜘蛛侠 纵横宇宙
+movie	蝙蝠侠 黑暗骑士 三部曲
+movie	教父 4K 修复版
+movie	肖申克的救赎 1080P
+movie	星际穿越 蓝光
+movie	盗梦空间 REMUX
+movie	让子弹飞 4K
+movie	霸王别姬 修复版
+movie	无间道 三部曲
+movie	功夫 周星驰
+movie	唐人街探案 3
+series	三体 电视剧 4K
+series	权力的游戏 全集
+series	绝命毒师 蓝光
+series	风骚律师 第六季
+series	怪奇物语 第四季
+series	鱿鱼游戏 第二季
+series	黑镜 全集
+series	西部世界 4K
+series	最后生还者 第一季
+series	切尔诺贝利 HBO
+series	繁花 电视剧 4K
+series	狂飙 全集
+series	漫长的季节
+series	隐秘的角落
+series	庆余年 第二季
+series	甄嬛传 1080P
+series	琅琊榜
+anime	进击的巨人 最终季
+anime	鬼灭之刃 全集
+anime	咒术回战 第二季
+anime	海贼王 剧场版
+anime	火影忍者 疾风传
+anime	死神 千年血战篇
+anime	间谍过家家
+anime	葬送的芙莉莲
+anime	孤独摇滚
+anime	赛博朋克 边缘行者
+anime	电锯人
+anime	排球少年
+anime	灌篮高手 剧场版
+anime	名侦探柯南 剧场版
+anime	哆啦A梦 大雄
+anime	龙珠 超
+anime	一拳超人
+comic	海贼王 漫画 全集
+comic	火影忍者 漫画 下载
+comic	一人之下 漫画
+comic	镖人 漫画
+comic	进击的巨人 漫画
+comic	死神 漫画
+comic	灌篮高手 漫画
+comic	名侦探柯南 漫画
+comic	龙珠 完全版 漫画
+comic	钢之炼金术师 漫画
+music	周杰伦 专辑 flac
+music	周杰伦 无损 全集
+music	林俊杰 专辑 无损
+music	陈奕迅 全集 flac
+music	五月天 专辑
+music	邓紫棋 专辑 无损
+music	薛之谦 专辑
+music	李荣浩 专辑
+music	Taylor Swift 专辑 flac
+music	周深 歌曲 无损
+music	古典音乐 无损 合集
+music	钢琴曲 纯音乐 无损
+music	爵士乐 合集 flac
+music	摇滚 经典 合集
+music	粤语老歌 合集
+music	ACG 音乐 合集
+music	久石让 宫崎骏 原声
+ebook	三体 电子书 epub
+ebook	明朝那些事儿 电子书
+ebook	鬼吹灯 全集 txt
+ebook	盗墓笔记 全集
+ebook	金庸 全集 电子书
+ebook	古龙 全集
+ebook	刘慈欣 全集 epub
+ebook	村上春树 作品集
+ebook	东野圭吾 全集
+ebook	哈利波特 全集 epub
+ebook	冰与火之歌 电子书
+ebook	沙丘 小说 epub
+ebook	平凡的世界 电子书
+ebook	活着 余华 电子书
+ebook	人类简史 mobi
+ebook	枪炮病菌与钢铁
+ebook	经济学原理 曼昆 pdf
+course	考研数学 网课
+course	考研英语 网课
+course	考公 网课 资料
+course	雅思 网课
+course	托福 网课
+course	Python 教程 视频
+course	Java 教程 全套
+course	前端 教程 视频
+course	机器学习 课程 视频
+course	深度学习 课程
+course	数据结构 网课
+course	PS 教程 全套
+course	剪辑 教程 视频
+course	Excel 教程 全套
+course	英语口语 网课
+course	日语 零基础 教程
+course	会计 网课
+software	Photoshop 破解
+software	Office 2021 激活
+software	Adobe 全家桶 破解
+software	Windows 11 激活工具
+software	AutoCAD 破解版
+software	MATLAB 破解
+software	SolidWorks 破解
+software	Final Cut Pro 破解
+software	DaVinci Resolve 破解
+software	VMware 破解
+software	IDM 下载工具 破解
+software	WinRAR 破解
+software	Notepad++ 中文
+software	截图工具 绿色版
+software	PDF 编辑器 破解
+software	清理工具 便携版
+software	录屏软件 破解
+game	赛博朋克 2077 破解
+game	艾尔登法环 下载
+game	塞尔达传说 王国之泪
+game	荒野大镖客 2
+game	战神 诸神黄昏
+game	使命召唤 现代战争
+game	我的世界 整合包
+game	模拟人生 4 全DLC
+game	双人成行
+game	黑神话 悟空
+game	只狼 破解
+game	巫师 3 年度版
+game	刺客信条 英灵殿
+game	文明 6 全DLC
+game	城市天际线 2
+game	Steam 离线版
+game	Switch 游戏 合集
+design	PSD 素材 模板
+design	UI 设计 素材包
+design	字体 合集 下载
+design	笔刷 合集 PS
+design	AE 模板 合集
+design	PPT 模板 合集
+design	简历 模板 合集
+design	样机 mockup 素材
+design	图标 icon 合集
+design	调色 LUT 预设
+design	C4D 模型 素材
+design	Blender 素材
+design	海报 模板 PSD
+design	电商 详情页 模板
+design	AI 矢量 素材
+design	LOGO 模板 合集
+design	婚礼 视频 模板
+academic	机器学习 论文
+academic	深度学习 论文 合集
+academic	自然语言处理 论文
+academic	计算机视觉 论文
+academic	区块链 论文
+academic	量子计算 论文
+academic	强化学习 论文
+academic	Transformer 论文
+academic	SCI 论文 写作
+academic	文献 管理 工具
+academic	知网 论文 下载
+academic	sci-hub 文献
+academic	数学 分析 教材
+academic	线性代数 教材 pdf
+academic	概率论 教材
+academic	物理学 教材 pdf
+academic	有机化学 教材
+audio-tool	Serum 合成器
+audio-tool	Omnisphere 音源
+audio-tool	Kontakt 音源
+audio-tool	大气合成器
+audio-tool	Massive X 音源
+audio-tool	FabFilter 插件
+audio-tool	Vital 合成器
+audio-tool	FL Studio 破解
+audio-tool	Cubase 破解
+audio-tool	Ableton Live 破解
+audio-tool	Logic Pro 音源
+audio-tool	Waves 插件 合集
+audio-tool	Valhalla 混响
+audio-tool	iZotope Ozone 母带
+audio-tool	采样包 合集
+audio-tool	鼓组 采样 合集
+audio-tool	Serum 预设 preset

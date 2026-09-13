@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextvars import ContextVar
 
 import httpx
 
 from ..models import RawHit
 
 REGISTRY: dict[str, type["Adapter"]] = {}
+# 每个源/查询独立的收集器，子协程继承；超时仍可取回已完成的页面。
+partial_hits: ContextVar[list[RawHit] | None] = ContextVar("partial_hits", default=None)
+
+
+def publish_hits(hits: list[RawHit]) -> list[RawHit]:
+    collector = partial_hits.get()
+    if collector is not None:
+        collector.extend(hits)
+    return hits
 
 
 def register(cls: type["Adapter"]) -> type["Adapter"]:

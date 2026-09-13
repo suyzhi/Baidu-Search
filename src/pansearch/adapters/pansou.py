@@ -12,15 +12,30 @@ PanSou 聚合了数十个网盘搜索插件 + 上千个 TG 频道，是覆盖面
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
 
 from ..extract import _parse_time
 from ..models import PanType, RawHit
 from ..normalize import detect_pan_type, pwd_from_url
+from ..query import normalize_text, subject_terms, term_present
 from .base import Adapter, register
 
 DEFAULT_INSTANCES = ["https://so.252035.xyz"]
+
+# 实例健康度（进程内）：失败的实例在 TTL 内被排到最后，避免每次搜索都为
+# 一个挂掉的实例白等一次超时 —— 公共实例实测经常 000/超时，而自建实例 0.16s。
+_HEALTH: dict[str, float] = {}
+HEALTH_TTL_SECONDS = 120.0
+
+
+def _healthy_first(instances: list[str]) -> list[str]:
+    """健康实例优先；全挂时仍按原顺序全试一遍（不能永久拉黑，要能自愈）。"""
+    now = time.monotonic()
+    good = [u for u in instances if _HEALTH.get(u, 0.0) <= now]
+    bad = [u for u in instances if _HEALTH.get(u, 0.0) > now]
+    return good + bad
 
 
 def _loads_lenient(content: bytes) -> dict | None:
@@ -55,7 +70,7 @@ class PansouAdapter(Adapter):
         return [u.rstrip("/") for u in (self.cfg.get("instances") or DEFAULT_INSTANCES)]
 
     async def _query(self, client: httpx.AsyncClient, url: str, kw: str) -> dict | None:
-        retries = int(self.cfg.get("retries") or 2)
+        retries = max(0, int(self.cfg.get("retries", 2)))
         timeout = float(self.cfg.get("timeout") or 15)
         last_err: str | None = None
         for attempt in range(retries + 1):
@@ -85,13 +100,17 @@ class PansouAdapter(Adapter):
     async def search(self, kw: str, client: httpx.AsyncClient) -> list[RawHit]:
         payload = None
         errors: list[str] = []
-        for instance in self.instances:
+        self.used_instance = None
+        for instance in _healthy_first(self.instances):
             try:
                 payload = await self._query(client, instance, kw)
             except RuntimeError as exc:
+                _HEALTH[instance] = time.monotonic() + HEALTH_TTL_SECONDS
                 errors.append(f"{instance}: {exc}")
                 continue
+            _HEALTH.pop(instance, None)          # 恢复健康
             if payload:
+                self.used_instance = instance
                 break
         if not payload:
             raise RuntimeError("; ".join(errors) or "PanSou 无响应")
@@ -119,7 +138,7 @@ class PansouAdapter(Adapter):
                             kind=kind,
                             url=url,
                             pwd=item.get("password") or pwd_from_url(url),
-                            title=_clean_note(item.get("note")),
+                            title=_clean_note(item.get("note"), kw),
                             shared_at=_parse_time(item.get("datetime")),
                             origin=None,
                         )
@@ -131,8 +150,15 @@ class PansouAdapter(Adapter):
         return hits
 
 
-def _clean_note(note: object) -> str | None:
+def _clean_note(note: object, query: str = "") -> str | None:
     if not note:
         return None
     text = " ".join(str(note).split())
+    # 部分插件把本轮查询原样前缀到标题。只有后面再次出现主题时才去掉，
+    # 避免把“沙丘 4K HDR 沙丘 1080P”误当完整画质匹配，也不误删正常标题。
+    prefix = " ".join(query.split())
+    if prefix and text.casefold().startswith(prefix.casefold() + " "):
+        remainder = text[len(prefix):].strip()
+        if any(term_present(normalize_text(remainder), t) for t in subject_terms(query)):
+            text = remainder
     return text[:300] or None

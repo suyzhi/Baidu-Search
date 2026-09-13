@@ -25,7 +25,7 @@ import httpx
 from ..config import CONFIG_DIR
 from ..models import RawHit
 from ..routing import classify
-from .base import Adapter, register
+from .base import Adapter, publish_hits, register
 
 UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -257,4 +257,4 @@ class ApiSourcesAdapter(Adapter):
                     origin=url,
                 )
             )
-        return hits
+        return publish_hits(hits)
