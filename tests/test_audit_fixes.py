@@ -141,6 +141,9 @@ def test_websearch_noise_host_uses_domain_boundaries():
     assert not _is_noise_host("netflix.com")
     assert not _is_noise_host("linux.com")
     assert not _is_noise_host("mybox.com")
+    # 内容页例外：公众号文章是"资源贴"的常见落点，但它挂在被整域排除的 qq.com 下
+    assert not _is_noise_host("mp.weixin.qq.com"), "公众号文章必须能进阶段 2 抓取"
+    assert _is_noise_host("im.qq.com")
 
 
 # ------------------------------------------------ 7. title_hint 缓存

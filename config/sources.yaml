@@ -34,6 +34,32 @@ sources:
     concurrency: 2
     rate_limit_qps: 5.0
 
+
+  # ---- C 环：B 站内搜（视频简介 + 评论区）----
+  # 网盘链接的真实产地：影视/软件的分享链接常常只贴在视频简介与评论区里
+  # （"链接：pan.baidu.com/s/xxx 提取码：xxxx"），搜索引擎索引不全、PanSou 不覆盖。
+  # 接口全部需要 WBI 签名 + 游客 buvid cookie，见 adapters/bilibili.py。
+  bilibili:
+    enabled: true
+    kind: bilibili
+    weight: 0.8
+    # 请求账：3 个模板 × 1 页搜索 + 1 次专栏搜索 + 最多 10 个视频 ×（简介 + 评论）≈ 25 次
+    # 以 4 qps 计约 6 秒；冷启动时 nav 取 key 再加 1 次。15 秒留足余量。
+    deadline: 15
+    concurrency: 5
+    rate_limit_qps: 4.0
+    search_pages: 1          # 每个模板抓几页（每页 20 条）
+    max_videos: 10           # 最多跟进多少个视频的简介 + 评论区
+    max_articles: 6          # 专栏只取搜索接口的摘要（正文需要浏览器渲染）
+    comment_pages: 1         # 评论翻几页；热评第一页覆盖大部分资源留言
+    comments: true
+    articles: true
+    templates:
+      - "{kw}"
+      # 后两条专捞"贴了网盘链接"的资源贴：只发原始关键词会漏掉这类标题
+      - "{kw} 百度网盘"
+      - "{kw} 资源 提取码"
+
   # ---- C 环：Telegram 频道（本地索引直连）----
   # 全网网盘链接的主要产地。直连 t.me，不经第三方，可并行上百频道 + 向历史翻页。
   # 首次搜索若索引为空会自动抓一轮；之后用 pansearch index crawl 持续加深。
@@ -87,45 +113,35 @@ sources:
   # 实测：绝大多数引擎不索引 pan.baidu.com/s 本身，但索引讨论页 → 必须两阶段。
   # brave 直接命中最多但会 429；so 备用。
   websearch:
-    # ⛔ 已关闭：实测（2026-09-13）bing 对 `site:pan.baidu.com/s` 只回"查询回显"、
-    # 没有真实分享链接，ddg 直接 ConnectError；单次 7.7s / 0 条，200 词全量里
-    # 几乎每次都超时。它现在是纯粹的 6 秒成本、零召回 —— 想恢复请先换成
-    # Brave / 自建 SearXNG，再把这个开关打开。
-    enabled: false
+    # ✅ 重新开启（2026-09-21 复测）：旧结论"零召回"是**模板**的问题，不是引擎挂了。
+    #   旧模板 'site:pan.baidu.com/s {kw}' 确实只回查询回显（引擎不索引分享页本身），
+    #   换成"资源意图"模板后同样三个引擎都能出东西：
+    #     bing  '{kw} 百度网盘'          97KB，候选页含 tieba/zhidao，结果页直接带 2 条 pan 链
+    #     ddg   '{kw} 百度网盘'          30KB，结果页直接带 3 条 pan 链
+    #     sogou '{kw} 网盘 提取码 分享'  466KB，结果页直接带 5 条 pan 链 + 公众号文章
+    #   实测逐个引擎（2026-09-21）：
+    #     brave 429 / ecosia 403 / so.com 只有反爬壳 / yandex·mojeek·searx 零结果 ❌
+    enabled: true
     kind: websearch
     weight: 0.6
     timeout: 25
-    # 实测每次 8~9 秒只回 0~1 条（换了 bing/ddg 之后仍是这个量级），
-    # 产出与耗时完全不成比例，砍到 6 秒。
-    deadline: 6
+    deadline: 9               # 与 PanSou 并行，9s 不会成为关键路径（PanSou 20s）
     concurrency: 3
-    rate_limit_qps: 1.5         # 实测 0.4 太保守：6 个请求光限速就要 15s
-    fetch_result_pages: true    # 阶段 2：抓内容页（召回主力，比阶段 1 值钱）
-    max_pages: 20
-    page_timeout: 10
+    rate_limit_qps: 1.5
+    fetch_result_pages: true  # 阶段 2：抓内容页（召回主力，比阶段 1 值钱）
+    max_pages: 12
+    page_timeout: 8
     page_concurrency: 8
     engines:
-      # 实测（2026-09）逐个引擎的结果：
-      #   brave    429 长期限流                       ❌ 白耗 3s
-      #   so.com   200 但只有 9.8KB 反爬空壳页        ❌ 白耗 2.7s
-      #   bing     200，结果页直接含 pan.baidu 链接   ✅
-      #   ddg      200，结果页直接含 pan.baidu 链接   ✅
-      #   另测 startpage / marginalia / searx / yandex / ecosia 均零网盘结果或 403。
-      # 两个失效引擎的组合会让这个源恒定 0 条却每次都耗 3~8 秒。
       bing: "https://cn.bing.com/search?q={q}"
       ddg: "https://html.duckduckgo.com/html/?q={q}"
+      sogou: "https://www.sogou.com/web?query={q}"
     templates:
-      - 'site:pan.baidu.com/s {kw}'
-      - '"{kw}" 百度网盘 提取码'
-
-  bilibili:
-    enabled: false
-    kind: bilibili
-    weight: 0.8
-    timeout: 20
-    concurrency: 2
-    rate_limit_qps: 1.0
-    fetch_comments: true
+      # 引擎不索引 pan.baidu.com/s 本身，但**索引"资源讨论页"**；
+      # 这三条模板同时覆盖"搜索结果页直接带链接"和"找到讨论页再跟进"两条路。
+      - '{kw} 百度网盘'
+      - '{kw} 网盘 提取码 分享'
+      - 'site:tieba.baidu.com {kw}'
 
 verify:
   enabled: true

@@ -9,11 +9,13 @@ from datetime import datetime
 from .models import PanType, RawHit
 from .query import query_terms, subject_terms
 from .normalize import (
+    BARE_PAN_RE,
     BARE_PWD_RE,
     MAGNET_RE,
     PWD_RE,
     URL_RE,
     detect_pan_type,
+    looks_like_share,
     parse_baidu,
     pwd_from_url,
 )
@@ -118,6 +120,8 @@ def extract_from_text(
         pan_type = detect_pan_type(url)
         if pan_type is PanType.OTHER:
             return
+        if not looks_like_share(pan_type, url):
+            return
         if "/share/init" in url and "surl=" not in url:
             return
         if pan_type is PanType.BAIDU:
@@ -143,6 +147,17 @@ def extract_from_text(
     # 磁力链接（VST 音源 / 软件 / 影视大量走磁力，且它没有 http:// 前缀）
     for m in MAGNET_RE.finditer(text):
         add_link(m.start(), m.end(), html_mod.unescape(m.group(0)))
+
+    # 裸域名形态的网盘链接（"pan.baidu.com/s/xxx"）—— 补上 http:// 再走同一条路。
+    # 跳过已被上面 http 链接覆盖的区间，避免同一条链接被抽两次。
+    def _covered(pos: int) -> bool:
+        return any(s <= pos < e for s, e in spans)
+
+    for m in BARE_PAN_RE.finditer(text):
+        if _covered(m.start(1)):
+            continue
+        raw = html_mod.unescape(m.group(1)).rstrip("。，、；;!！?？'\"")
+        add_link(m.start(1), m.start(1) + len(raw), "https://" + raw)
 
     if not links:
         return []

@@ -69,7 +69,15 @@ _NOISE_EXT = (
 )
 
 
+# 噪声域名里也要留出口子：这些是**内容页**，正是阶段 2 要抓的东西。
+# 实测 mp.weixin.qq.com（公众号文章）与 tieba / zhidao 是"资源贴"的常见落点，
+# 但它们挂在 qq.com / baidu.com 这类被整域排除的域名下。
+_CONTENT_EXCEPTIONS = ("mp.weixin.qq.com",)
+
+
 def _is_noise_host(host: str) -> bool:
+    if host in _CONTENT_EXCEPTIONS or host.endswith("." + _CONTENT_EXCEPTIONS[0]):
+        return False
     """搜索引擎自身 / CDN / 统计站，不该作为"资源讨论页"去抓。
 
     带点的条目（bing.com / x.com / qq.com）必须按**域名边界**匹配：

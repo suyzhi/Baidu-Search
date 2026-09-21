@@ -98,6 +98,20 @@ URL_RE = re.compile(
     r"\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef]+"
 )
 
+# 裸域名形态的网盘分享链（**没有 http:// 前缀**）：
+#   "链接：pan.baidu.com/s/1abcdef 提取码：abcd"
+# B 站评论、贴吧楼中楼、TG 消息里大量这样写，而 URL_RE 只认带协议的形态，
+# 于是这部分链接此前一条都抽不出来（实测某视频置顶评论里的百度链就是这样漏掉的）。
+# 只认已知网盘域名：放开成"任意域名/路径"会把 "www.bilibili.com/video/BV1xx"
+# 这类正文一起吞进来，噪声远大于收益。
+BARE_PAN_HOSTS = tuple(h for h, _ in _HOST_RULES if not h.endswith("."))
+BARE_PAN_RE = re.compile(
+    rf"(?<![\w.@/-])((?:{'|'.join(re.escape(h) for h in BARE_PAN_HOSTS)})/"
+    r"[^\s\"'<>()（）【】「」『』《》，,、。；;：:！!？?\]\[{}|\\^`"
+    r"\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef]+)",
+    re.I,
+)
+
 # 磁力链接：它没有 http(s):// 前缀，URL_RE 匹配不到 ——
 # 所以之前所有磁力都只来自 PanSou 的 JSON，从页面/消息正文里一个都抽不出来。
 # VST 音源、软件、影视的分享大量走磁力，必须单独抽。
@@ -105,8 +119,39 @@ MAGNET_RE = re.compile(
     r"magnet:\?xt=urn:btih:[A-Za-z0-9]{32,40}(?:&[^\s\"'<>()（）【】「」『』《》，,、。；;\]\[]+)*",
     re.I,
 )
+# 需要"分享路径"校验的网盘类型（磁力/直链/未知类型不做这个判断）
+_SHARE_TYPED = frozenset({
+    PanType.BAIDU, PanType.QUARK, PanType.ALIYUN, PanType.XUNLEI,
+    PanType.TIANYI, PanType.UC, PanType.P123, PanType.P115, PanType.PIKPAK,
+})
+
 BAIDU_SURL_RE = re.compile(r"pan\.baidu\.com/s/([A-Za-z0-9_-]+)", re.I)
 BAIDU_SURL_ENCODED_RE = re.compile(r"pan\.baidu\.com(?:%2F|/)s(?:%2F|/)([A-Za-z0-9_-]+)", re.I)
+
+
+# 网盘域名下的"分享路径"形态。网盘主站域名也会出现在登录 / 客户端下载 / 推广链接里，
+# 实测（关键词「三体」，B 环抓到的内容页上）：
+#   auth.aliyundrive.com / www.aliyundrive.com/applink / member.aliyundrive.com /
+#   open.aliyundrive.com  —— 一次查询就带进 10 条"阿里云盘"噪声，全是假资源。
+_SHARE_PATH_RE = re.compile(r"^/(?:s|t|share)(?:/|$)", re.I)
+
+
+def looks_like_share(pan_type: "PanType", url: str) -> bool:
+    """该 URL 是不是**分享入口**（而不是网盘主站/登录/下载页）。
+
+    判据故意放宽：路径以 /s、/t、/share 开头、路径里出现 share、或 query 带
+    surl / shareid / sharelink 都算；只有"网盘域名 + 无分享特征的路径"才拦掉。
+    """
+    if pan_type not in _SHARE_TYPED:
+        return True
+    parsed = safe_urlsplit(url)
+    path = parsed.path or ""
+    if _SHARE_PATH_RE.match(path) or "share" in path.lower():
+        return True
+    if path.rstrip("/") == "" and not parsed.query:
+        return False
+    qs = parse_qs(parsed.query)
+    return any(k in qs for k in ("surl", "shareid", "sharelink"))
 
 
 def detect_pan_type(url: str) -> PanType:

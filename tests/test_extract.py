@@ -129,6 +129,29 @@ def test_excerpt_handles_empty_inputs():
     assert excerpt("x", None) == "x"
 
 
+# ---------------------------------------------------------------- 分享路径过滤
+def test_rejects_netdisk_login_and_download_pages():
+    """回归：B 环抓到的内容页里，网盘主站的登录/下载地址会被当成"资源"。
+
+    实测「三体」一次查询带进 10 条假阿里云盘（auth./member./open./applink）。
+    """
+    t = ("https://auth.aliyundrive.com https://member.aliyundrive.com "
+         "https://open.aliyundrive.com https://www.aliyundrive.com/applink "
+         "https://pan.baidu.com/disk/home")
+    assert _hits(t) == []
+
+
+def test_keeps_real_share_paths():
+    got = {h.url for h in _hits(
+        "https://www.aliyundrive.com/s/abcd1234 "
+        "https://pan.baidu.com/share/init?surl=1AbCdEf "
+        "https://cloud.189.cn/t/abc123 "
+        "https://drive.uc.cn/s/abc123")}
+    assert "https://www.aliyundrive.com/s/abcd1234" in got
+    assert "https://cloud.189.cn/t/abc123" in got
+    assert "https://drive.uc.cn/s/abc123" in got
+
+
 # ---------------------------------------------------------------- 磁力抽取
 def test_extracts_magnet_links():
     """回归：URL_RE 只匹配 http(s)，磁力链接一个都抽不出来。
@@ -152,3 +175,39 @@ def test_magnet_and_netdisk_in_same_text():
 def test_bare_infohash_is_not_a_link():
     """裸的 40 位 hash 不算链接，别误收。"""
     assert _hits("哈希 0F0F45F06F13C55DF3384E4253FA6F69E99B73DF 单独出现") == []
+
+
+# ---------------------------------------------------------------- 裸域名链接（无 http://）
+def test_extracts_scheme_less_netdisk_link():
+    """回归：B 站评论 / 贴吧楼中楼 / TG 消息里大量写 "pan.baidu.com/s/xxx 提取码:xxxx"，
+    而 URL_RE 只认带协议的形态 —— 这部分链接此前一条都抽不出来。"""
+    hits = _hits("置顶：链接 pan.baidu.com/s/1abcdefghij 提取码：k3m9")
+    assert len(hits) == 1
+    assert hits[0].url == "https://pan.baidu.com/s/1abcdefghij"
+    assert hits[0].pwd == "k3m9"
+
+
+def test_scheme_less_does_not_duplicate_full_url():
+    """同一个链接带协议出现时，不能被裸域名规则再抽一遍。"""
+    hits = _hits("https://pan.baidu.com/s/1abcdefghij 提取码：k3m9")
+    assert len(hits) == 1
+
+
+def test_scheme_less_ignores_non_netdisk_hosts():
+    """只给已知网盘域名补 http://：普通域名不能被当成资源链接。"""
+    assert _hits("看 www.bilibili.com/video/BV1xx 和 github.com/foo/bar") == []
+
+
+def test_scheme_less_covers_other_pan_types():
+    got = {h.url: h.pwd for h in _hits(
+        "夸克 pan.quark.cn/s/251cd20497e6 提取码 8x2k；115 115.com/s/abcdefg 去广告")}
+    assert got.get("https://pan.quark.cn/s/251cd20497e6") == "8x2k"
+    assert "https://115.com/s/abcdefg" in got, "中文随后出现时不能把中文吃进 URL"
+
+
+def test_scheme_less_in_comment_like_text():
+    """评论常写成 "链接:pan.baidu.com/s/xxx 提取码: abcd"，冒号与空格混排。"""
+    hits = _hits("链接:pan.baidu.com/s/1ZZZzzz999 提取码: abcd —— 自取")
+    assert len(hits) == 1
+    assert hits[0].pwd == "abcd"
+
