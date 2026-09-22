@@ -116,7 +116,10 @@ sources:
     # 而同期的 telegram 0.4 秒回 131 条。它长期是整条链路的关键路径。
     # 砍到 12 秒：慢站拿不到就算了，不再让它一个人决定整次搜索要等多久。
     deadline: 12
-    concurrency: 4          # 同时打几个站
+    # 目录扩到 50+ 个站之后：并发 4→8、每查询站点数 12→16，
+    # 保证"垂直站 + 高产出站"都能在 12 秒预算内轮到。
+    concurrency: 8          # 同时打几个站
+    max_sites: 16           # 每个查询最多打几个站（按 垂直命中 → 探测 yield 排序）
     max_pages: 4            # 每个站最多跟进几个详情页（再多收益很小）
     page_timeout: 12
     page_concurrency: 10
@@ -167,6 +170,12 @@ sources:
       # 包括直连时 429/403 的 google/brave/qwant/mojeek。
       # 实测（2026-09-21，"三体 百度网盘"）：20 条结果，其中 6 条带 pan 链，
       # 还带出 rrdynb/zaodianying/ewang100 这类"资源讨论页"，正是阶段 2 要抓的。
+      # 复测新增（2026-09-21，模板「{kw} 百度网盘 提取码」）：
+      #   naver   350KB，结果页直接带 3 条 pan 链 + 24 个候选内容页（含 bilibili/豆瓣/论坛）
+      #   toutiao 1.67MB，结果页直接带 1 条 pan 链 + 3~16 个候选页
+      #   （sogou 本次退化为反爬壳、ddg 返回 202 挑战页 —— 保留但不指望，见 deadline 兜底）
+      naver: "https://search.naver.com/search.naver?query={q}"
+      toutiao: "https://so.toutiao.com/search?keyword={q}"
       searxng: "http://127.0.0.1:8889/search?q={q}&format=json"
     templates:
       # 引擎不索引 pan.baidu.com/s 本身，但**索引"资源讨论页"**；
@@ -226,6 +235,14 @@ scoring:
   pan_priority_bonus: 0.25   # 百度优先：相对提升 25%（乘法因子，不做排序层级）
   relaxed_penalty: 0.5       # 只被补搜命中且未完整匹配的结果降权；完整匹配不扣分
   relevance_power: 2.0       # 相关性幂次闸门：把"主题词命中/缺失"的差距拉大，防止被加成翻盘
+
+# 成人内容源标记（默认**启用**，用 pansearch search --sfw 可一键过滤掉）。
+# 为什么按"来源"而不是按关键词过滤：javdb 这类源返回的**就是**成人内容，
+# 靠标题关键词猜既会漏（不同语言/缩写）也会误伤（"写真集""深夜剧"这类正常资源）。
+# 标记写成"来源标签的前缀/子串"，与结果里的 sources 字段对应。
+adult_sources:
+  - "plugin:javdb"     # PanSou 的 JavDB 插件（成人影片数据库）
+  - "bt:sukebei"       # sukebei.nyaa.si（nyaa 的成人分区）
 
 # 抓取阶段的整体截止时间（秒）：超过就跳过还没返回的数据源。
 # 实测 TG 本地索引 0.0s / PanSou 8~15s / Brave 15~22s —— 不等最慢的那个。

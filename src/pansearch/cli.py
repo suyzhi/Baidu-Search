@@ -111,6 +111,9 @@ def _summary(outcome, resources: list[Resource]) -> Panel:
         lines.append(
             f"[dim]原始查询召回不足，已自动补搜：{'、'.join(outcome.queries_used[1:])}[/dim]"
         )
+    if getattr(outcome, "adult_pruned", 0):
+        lines.append(f"已按 --sfw 过滤成人来源命中 [bold]{outcome.adult_pruned}[/bold] 条"
+                     f"[dim]（javdb / sukebei，可在 sources.yaml 的 adult_sources 调整）[/dim]")
     if outcome.irrelevant_pruned:
         lines.append(f"已过滤明确无关结果 {outcome.irrelevant_pruned} 条")
     if outcome.verify_timeout_skipped:
@@ -170,6 +173,7 @@ def search(
     verify_budget: int = typer.Option(None, "--verify-budget", help="最多验活多少条（默认取配置，0=不限制）"),
     no_verify: bool = typer.Option(False, "--no-verify", help="跳过有效性校验（快很多，但不知道链接死活）"),
     show_origins: bool = typer.Option(False, "--origins", help="额外打印来源页面"),
+    sfw: bool = typer.Option(False, "--sfw", help="过滤成人来源（javdb / sukebei），见 sources.yaml 的 adult_sources"),
     json_out: Optional[Path] = typer.Option(None, "--json", help="结果导出为 JSON"),
     csv_out: Optional[Path] = typer.Option(None, "--csv", help="结果导出为 CSV"),
 ) -> None:
@@ -187,6 +191,7 @@ def search(
                 alive_only=not show_all,
                 strict=strict,
                 relax=relax,
+                sfw=sfw,
                 verify_budget=verify_budget,
                 limit=None,
             )

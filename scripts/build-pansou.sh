@@ -15,8 +15,10 @@ set -euo pipefail
 SRC_DIR="${PANSOU_SRC:-.cache/pansou-src}"
 IMAGE="${PANSOU_BUILD_IMAGE:-pansou:local}"
 REPO="${PANSOU_REPO:-https://github.com/fish2018/pansou.git}"
-# 不收的插件：javdb 是成人站；其余按需用 PANSOU_PLUGIN_SKIP 追加
-SKIP="${PANSOU_PLUGIN_SKIP:-javdb}"
+# 插件不再默认排除任何站点：javdb（成人站）默认**收进来**，
+# 需要过滤时用 pansearch 的 --sfw（见 config/sources.yaml 的 adult_sources），
+# 而不是在构建阶段把它删掉 —— 构建和过滤是两件事。
+SKIP="${PANSOU_PLUGIN_SKIP:-}"
 
 command -v docker >/dev/null || { echo "需要 docker（colima start 后再试）" >&2; exit 1; }
 docker info >/dev/null 2>&1 || colima start

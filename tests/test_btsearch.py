@@ -73,7 +73,10 @@ def test_select_sites_follows_verticals():
     a = make_adapter()
     # 音源（audio-tool）只打 nyaa；动画两个站都打；设计类查询一个都不打（避免白跑）
     assert [s["name"] for s in a.select_sites("Omnisphere")] == ["nyaa"]
-    assert {s["name"] for s in a.select_sites("三体")} == {"nyaa", "dmhy"}
+    # "三体" 不含任何垂直领域特征词 → 走"全都打"的兜底分支，所以是全部站点；
+    # 数量由 max_sites 兜底，不会因为加站而无限变慢。
+    expected = {s["name"] for s in a.sites}
+    assert {s["name"] for s in a.select_sites("三体")} == expected
     assert a.select_sites("PPT模板 素材") == []
 
 

@@ -28,7 +28,7 @@ CHANNELS="tgsearchers7,Aliyun_4K_Movies,yunpanx,yp123pan,yunpanxunlei,tianyifc,p
 # 实测（2026-09-21）：容器里只开了 68 个，而 GitHub 上 fish2018/pansou 的 plugin/ 目录有 111 个
 # （其中 plugin.go 是源码、javdb 是成人站，两者不收），也就是说**三分之一的网盘搜索站从来没被查过**。
 # 每个插件都对应一个独立的网盘搜索站点，开着不用的代价只是慢一点的查询。
-PLUGINS="dyyjpro,duoduo,djgou,feikuai,gaoqing888,gying,hdmoli,haitunsou,hunhepan,ikantv,jutoushe,kkv,dy4k,libvio,lingjisp,lou1,melost,meitizy,miosou,nyaa,ouge,panlian,pansearch,qqpd,quark4k,quarksoo,quarktv,qupanshe,sousou,thepiratebay,ting77,wanou,weibo,xb6v,xiaokupan,xiaozhang,xiaoyu,yingso,yulinshufa,yunso,yunsou,zlxapp,zxzj,rrbt,quarkres,diduan,erxiao,huban,labi,muou,shandian,zhizhen,clxiong,cyg,jsnoteclub,duanjuw,dyyj,nsgame,cldi,clmao,susu,u3c3,5266ys,dygang,leso,btbtlb,aipan,sopanya,ahhhhfs,aikanzy,alupan,ash,bixin,buerchen,daishudj,discourse,haisou,hdr4k,hjzhencai,jikepan,jupansou,kkmao,kpkuang,leijing,miaoso,mikuclub,mizixing,pan365,pan666,panta,panwiki,panyq,panzun,pianku,pioz,qingying,qiwei,qupansou,sdso,wuji,xdpan,xdyh,xiaoji,xinjuc,xuexizhinan,xys,yiove,ypfxw,yuhuage"
+PLUGINS="dyyjpro,duoduo,djgou,feikuai,gaoqing888,gying,hdmoli,haitunsou,hunhepan,ikantv,jutoushe,kkv,dy4k,libvio,lingjisp,lou1,melost,meitizy,miosou,nyaa,ouge,panlian,pansearch,qqpd,quark4k,quarksoo,quarktv,qupanshe,sousou,thepiratebay,ting77,wanou,weibo,xb6v,xiaokupan,xiaozhang,xiaoyu,yingso,yulinshufa,yunso,yunsou,zlxapp,zxzj,rrbt,quarkres,diduan,erxiao,huban,labi,muou,shandian,zhizhen,clxiong,cyg,jsnoteclub,duanjuw,dyyj,nsgame,cldi,clmao,susu,u3c3,5266ys,dygang,leso,btbtlb,aipan,sopanya,javdb,ahhhhfs,aikanzy,alupan,ash,bixin,buerchen,daishudj,discourse,haisou,hdr4k,hjzhencai,jikepan,jupansou,kkmao,kpkuang,leijing,miaoso,mikuclub,mizixing,pan365,pan666,panta,panwiki,panyq,panzun,pianku,pioz,qingying,qiwei,qupansou,sdso,wuji,xdpan,xdyh,xiaoji,xinjuc,xuexizhinan,xys,yiove,ypfxw,yuhuage"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "未找到 docker。先安装：brew install colima docker" >&2
@@ -57,6 +57,11 @@ echo "启动容器（端口 ${PORT}）…"
 # 实测 8s -> 4s 时首次查询耗时减半，命中数基本不变。
 docker volume create pansou-cache >/dev/null
 
+# 两个易踩的参数（实测）：
+#   · CACHE_TTL 900→300：PanSou 的**响应缓存**会把"冷查询只跑完一部分插件"的结果
+#     整整缓存 15 分钟 —— 插件后台合并只写插件缓存、不改写响应缓存，表现为某个插件的
+#     结果"凭空消失"（实测 rrbt 对 Omnisphere 的 10 条百度链）。缩到 5 分钟后可自愈。
+#   · ASYNC_MAX_BACKGROUND_WORKERS 40→80：插件数 68→108 之后，40 个 worker 冷查询跑不完。
 docker run -d --name pansou --restart unless-stopped \
   -p "${PORT}:8888" \
   -v pansou-cache:/app/cache \
@@ -64,11 +69,11 @@ docker run -d --name pansou --restart unless-stopped \
   -e AUTH_ENABLED=false \
   -e CHANNELS="$CHANNELS" \
   -e ENABLED_PLUGINS="$PLUGINS" \
-  -e CACHE_ENABLED=true -e CACHE_TTL=900 \
+  -e CACHE_ENABLED=true -e CACHE_TTL=300 \
   -e ASYNC_PLUGIN_ENABLED=true \
-  -e ASYNC_RESPONSE_TIMEOUT=4 \
+  -e ASYNC_RESPONSE_TIMEOUT="${PANSOU_ASYNC_TIMEOUT:-10}" \
   -e ASYNC_CACHE_TTL_HOURS=6 \
-  -e ASYNC_MAX_BACKGROUND_WORKERS=40 \
+  -e ASYNC_MAX_BACKGROUND_WORKERS=80 \
   "$IMAGE"
 
 echo

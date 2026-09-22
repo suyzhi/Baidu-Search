@@ -291,6 +291,17 @@ class SiteEntry:
     def host(self) -> str:
         return self.domain.split("//")[-1].strip("/")
 
+    @property
+    def link_yield(self) -> int:
+        """探测时实测到的"详情页链接产出"（写在 note 里，如 "yield=16"）。
+
+        站点选择要靠它排序：目录从 20 个站扩到 50 多个之后，如果只按文件顺序取
+        前 N 个，新增的通用站会把垂直站挤出去 —— 实测「Omnisphere」的百度链
+        因此从 17 条掉到 5 条。
+        """
+        m = re.search(r"yield=(\d+)", self.note or "")
+        return int(m.group(1)) if m else 0
+
     def to_dict(self) -> dict:
         out = {"name": self.name, "domain": self.domain}
         if self.verticals:

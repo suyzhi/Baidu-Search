@@ -16,6 +16,90 @@
 #   weight         排序权重
 
 apis:
+  # ---- 2026-09-22 由"API 侦查"逐个实测收录（括号里是当次命中数）----
+  # 判定标准：无需 key、JSON 可解析、条目能拼出可点链接。
+  # 明确**没收**的（实测无产出/需 key/字段无法解析）：semantic scholar(429)、
+  # core.ac.uk(需 key)、opensubtitles(需 key)、tmdb/omdb(需 key)、jikan(504)、
+  # biorxiv(只能按日期不能按关键词)、figshare(需 POST)、standardebooks/gutenberg
+  # 的 HTML 搜索页(适配器只吃 json/xml)、hathitrust(403 CF)。
+  # ---- 需要适配器新能力的（POST / 顶层数组）----
+  # 实测没收的两个 HTML 搜索页：standardebooks / gutenberg 的搜索结果**是 JS 渲染**，
+  # 首屏 HTML 里只有导航锚点、没有 /ebooks/<id> 链接 —— 抽不到就不是数据源。
+  - name: figshare
+    vertical: academic
+    enabled: true
+    weight: 0.5
+    method: POST
+    body: '{"search_for": "{q}", "page_size": 20}'
+    url: "https://api.figshare.com/v2/articles/search"
+    format: json
+    items: "$"
+    title: title
+    link: url_public_html
+
+  - name: tvmaze
+    vertical: movie
+    enabled: true
+    weight: 0.5
+    url: "https://api.tvmaze.com/search/shows?q={q}"
+    format: json
+    items: "$"
+    title: show.name
+    link: show.url
+
+  - name: gutendex
+    vertical: ebook
+    enabled: true
+    weight: 0.6
+    url: "https://gutendex.com/books/?search={q}"
+    format: json
+    items: results
+    title: title
+    link_template: "https://www.gutenberg.org/ebooks/{id}"
+
+  - name: zenodo
+    vertical: academic
+    enabled: true
+    weight: 0.5
+    url: "https://zenodo.org/api/records?q={q}&size=20"
+    format: json
+    items: hits.hits
+    title: metadata.title
+    link: links.self_html
+
+  - name: datacite
+    vertical: academic
+    enabled: true
+    weight: 0.5
+    url: "https://api.datacite.org/dois?query={q}&page[size]=20"
+    format: json
+    items: data
+    title: attributes.titles.0.title
+    link: attributes.url
+
+  - name: kitsu
+    vertical: anime,comic
+    enabled: true
+    weight: 0.6
+    # Kitsu 是 JSON:API：Accept 不带 vnd.api+json 会直接 406（实测）
+    headers:
+      Accept: "application/vnd.api+json"
+    url: "https://kitsu.io/api/edge/anime?filter[text]={q}&page[limit]=20"
+    format: json
+    items: data
+    title: attributes.canonicalTitle
+    link_template: "https://kitsu.io/anime/{id}"
+
+  - name: yts
+    vertical: movie
+    enabled: true
+    weight: 0.6
+    url: "https://yts.lt/api/v2/list_movies.json?query_term={q}&limit=20"
+    format: json
+    items: data.movies
+    title: title
+    link: url
+
   - name: arxiv
     vertical: academic
     enabled: true

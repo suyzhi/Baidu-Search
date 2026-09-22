@@ -85,6 +85,8 @@ class SearchOutcome:
     verify_budget_skipped: int = 0
     verify_timeout_skipped: int = 0
     irrelevant_pruned: int = 0
+    # --sfw 时被剔掉的成人站结果数（用于在摘要里如实说明"过滤了多少"）
+    nsfw_pruned: int = 0
     used_sources: list[str] = field(default_factory=list)
     queries_used: list[str] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)
@@ -92,6 +94,8 @@ class SearchOutcome:
     # 有了它，"结果少"才能区分成"确实没有"还是"某个源挂了"—— 不允许静默降级。
     source_report: dict[str, dict] = field(default_factory=dict)
     degraded: list[str] = field(default_factory=list)
+    # --sfw 时被过滤掉的成人源命中数（如实展示，避免"结果变少但不知道为什么"）
+    adult_pruned: int = 0
     # 本次结果是否来自查询级缓存（重复搜索稳定、且省掉一次全网抓取）
     from_cache: bool = False
     verify_stats: dict = field(default_factory=dict)
@@ -164,14 +168,37 @@ def clear_query_cache() -> None:
 
 
 def _query_cache_key(kw, types, source_names, do_verify, alive_only, strict, relax,
-                     verify_budget) -> str:
+                     verify_budget, sfw: bool = False) -> str:
     return "|".join([
         kw,
         ",".join(sorted(t.value for t in (types or []))),
         ",".join(sorted(source_names or [])),
         str(bool(do_verify)), str(bool(alive_only)), str(bool(strict)), str(bool(relax)),
-        str(verify_budget),
+        str(verify_budget), str(bool(sfw)),
     ])
+
+
+def adult_sources() -> tuple[str, ...]:
+    """config/sources.yaml 里标记为成人内容的来源标签。"""
+    raw = sources_config().get("adult_sources") or []
+    return tuple(str(s).lower() for s in raw if str(s).strip())
+
+
+def is_adult_source(source: str | None) -> bool:
+    low = str(source or "").lower()
+    return any(marker in low for marker in adult_sources())
+
+
+def filter_adult_hits(hits: list[RawHit]) -> tuple[list[RawHit], int]:
+    """--sfw：按来源过滤成人源命中，返回 (保留的命中, 过滤掉的条数)。
+
+    按"来源"而不是按标题关键词过滤：javdb 这类源返回的**就是**成人内容，
+    靠标题猜既会漏（不同语言/缩写）也会误伤（"写真集""深夜剧"这类正常资源）。
+    """
+    if not adult_sources():
+        return hits, 0
+    kept = [h for h in hits if not is_adult_source(h.source)]
+    return kept, len(hits) - len(kept)
 
 
 def _merge_report(acc: dict[str, dict], rep: dict[str, dict]) -> None:
@@ -260,11 +287,35 @@ async def _fetch_hits(
     return hits, errors, report
 
 
+def nsfw_markers() -> tuple[str, ...]:
+    """成人内容源的标记（config/sources.yaml 的 nsfw_sources）。
+
+    做法是**按来源标记而不是按关键词猜**：javdb 这种源返回的就是成人内容，
+    打标记最准确；靠标题关键词判断既会漏也会误伤（"写真集"之类的正常资源）。
+    """
+    return tuple(str(m).lower() for m in (sources_config().get("nsfw_sources") or []))
+
+
+def is_nsfw(resource: Resource) -> bool:
+    markers = nsfw_markers()
+    if not markers:
+        return False
+    for label in [*resource.sources, *resource.kinds]:
+        low = str(label).lower()
+        if any(m in low for m in markers):
+            return True
+    return False
+
+
 def _prepare(outcome: SearchOutcome, hits: list[RawHit], equivalents: list[str],
-             types: list[PanType] | None, alive_only: bool) -> None:
+             types: list[PanType] | None, alive_only: bool, sfw: bool = False) -> None:
     outcome.raw_hits = len(hits)
     resources = build_resources(hits)
     outcome.dedup_count = len(resources)
+    if sfw:
+        kept = [r for r in resources if not is_nsfw(r)]
+        outcome.nsfw_pruned = len(resources) - len(kept)
+        resources = kept
     if types:
         allowed = set(types)
         resources = [r for r in resources if r.pan_type in allowed]
@@ -296,6 +347,7 @@ async def search(
     alive_only: bool = False,
     strict: bool = False,
     relax: bool = True,
+    sfw: bool = False,
     verify_budget: int | None = None,
     limit: int | None = None,
     on_progress: Callable[[SearchOutcome], Awaitable[None]] | None = None,
@@ -323,7 +375,7 @@ async def search(
     cache_key = None
     if cache_ttl > 0 and not limit:
         cache_key = _query_cache_key(kw, types, source_names, do_verify, alive_only,
-                                     strict, relax, verify_budget)
+                                     strict, relax, verify_budget, sfw)
         hit = _QUERY_CACHE.get(cache_key)
         if hit and time.monotonic() - hit[0] <= cache_ttl:
             cached = deepcopy(hit[1])
@@ -373,6 +425,8 @@ async def search(
                 outcome.degraded = sorted(name for name, report in outcome.source_report.items()
                                           if report["status"] in ("error", "timeout", "degraded"))
                 hits = [h for n in sorted(completed) for h in completed[n]]
+                if sfw:
+                    hits, outcome.adult_pruned = filter_adult_hits(hits)
                 outcome.queries_used = list(dict.fromkeys([query_kw, *[h.query for h in hits if h.query]]))
                 if on_progress and got:
                     # 每个来源只检索一次；CPU 工作移出事件循环，慢源继续并发运行。

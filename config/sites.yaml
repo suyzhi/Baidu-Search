@@ -17,6 +17,14 @@ sites:
   result_re: https://share\.dmhy\.org/[a-z0-9_-]+/[a-z0-9_-]+/\d+_[a-z0-9_-]+\.html
   verified: true
   note: probe https://share.dmhy.org/topics/list?keyword={q} yield=19
+- name: cangshuxiaoxie
+  domain: www.cangshuxiaoxie.com
+  verticals:
+  - anime
+  search: https://www.cangshuxiaoxie.com/?s={q}
+  result_re: https://www\.cangshuxiaoxie\.com/[a-z0-9_-]+/\d+/\d+\.html
+  verified: true
+  note: probe https://www.cangshuxiaoxie.com/?s={q} yield=3
 - name: looptorrent
   domain: looptorrent.net
   verticals:
@@ -51,14 +59,6 @@ sites:
   result_re: https://vstorrent\.org/[a-z0-9_-]+/
   verified: true
   note: probe https://vstorrent.org/?s={q} yield=30
-- name: jpsmile
-  domain: jpsmile.com
-  verticals:
-  - design
-  search: https://jpsmile.com/?s={q}
-  result_re: https://jpsmile\.com/[a-z0-9_-]+/
-  verified: true
-  note: probe https://jpsmile.com/?s={q} yield=4
 - name: adobeae
   domain: www.adobeae.com
   verticals:
@@ -83,6 +83,14 @@ sites:
   result_re: https://bookfere\.com/[a-z0-9_-]+/\d+\.html
   verified: true
   note: probe https://bookfere.com/?s={q} yield=9
+- name: libgen
+  domain: libgen.li
+  verticals:
+  - ebook
+  search: https://libgen.li/index.php?req={q}
+  result_re: https://libgen\.li/[a-z0-9_-]+\.php
+  verified: true
+  note: probe https://libgen.li/index.php?req={q} yield=15
 - name: cyx
   domain: cyx.im
   verticals:
@@ -91,14 +99,286 @@ sites:
   result_re: https://cyx\.im/[a-z0-9_-]+\.html
   verified: true
   note: probe https://cyx.im/search/{q} yield=2
+- name: dodi-repacks
+  domain: dodi-repacks.site
+  verticals:
+  - game
+  search: https://dodi-repacks.site/?s={q}
+  result_re: https://dodi\-repacks\.site/\d+\-[a-z0-9_-]+/
+  verified: true
+  note: probe https://dodi-repacks.site/?s={q} yield=1
+- name: fitgirl-repacks
+  domain: fitgirl-repacks.site
+  verticals:
+  - game
+  search: https://fitgirl-repacks.site/?s={q}
+  result_re: https://fitgirl\-repacks\.site/[a-z0-9_-]+/\d+
+  verified: true
+  note: probe https://fitgirl-repacks.site/?s={q} yield=39
+- name: 699pic
+  domain: 699pic.com
+  verticals:
+  - general
+  search: https://699pic.com/search?q={q}
+  result_re: https://699pic\.com//\d+[a-z0-9_-]+\.[a-z0-9_-]+/[a-z0-9_-]+\.html
+  verified: true
+  note: probe https://699pic.com/search?q={q} yield=1
+- name: daimajia
+  domain: daimajia.com
+  verticals:
+  - general
+  search: https://daimajia.com/?s={q}
+  result_re: https://daimajia\.com/\d+/\d+/\d+/[a-z0-9_-]+/
+  verified: true
+  note: probe https://daimajia.com/?s={q} yield=1
+- name: apprcn
+  domain: free.apprcn.com
+  verticals:
+  - general
+  search: https://free.apprcn.com/?s={q}
+  result_re: https://free\.apprcn\.com/[a-z0-9_-]+/
+  verified: true
+  note: probe https://free.apprcn.com/?s={q} yield=1
+- name: jpsmile
+  domain: jpsmile.com
+  verticals:
+  - general
+  search: https://jpsmile.com/?s={q}
+  result_re: https://jpsmile\.com/[a-z0-9_-]+/
+  verified: true
+  note: probe https://jpsmile.com/?s={q} yield=4
+- name: itmop
+  domain: m.itmop.com
+  verticals:
+  - general
+  search: https://m.itmop.com/search/?q={q}
+  result_re: https://m\.itmop\.com/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://m.itmop.com/search/?q={q} yield=1
+- name: segmentfault
+  domain: segmentfault.com
+  verticals:
+  - general
+  search: https://segmentfault.com/search?q={q}
+  result_re: https://segmentfault\.com/[a-z0-9_-]+/[a-z0-9_-]+
+  verified: true
+  note: probe https://segmentfault.com/search?q={q} yield=1
+- name: slsup
+  domain: slsup.com
+  verticals:
+  - general
+  search: https://slsup.com/search.php?q={q}
+  result_re: https://slsup\.com/[a-z0-9_-]+\.html
+  verified: true
+  note: probe https://slsup.com/search.php?q={q} yield=16
+- name: toolsdar
+  domain: toolsdar.cn
+  verticals:
+  - general
+  search: https://toolsdar.cn/?s={q}
+  result_re: https://toolsdar\.cn/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://toolsdar.cn/?s={q} yield=7
+- name: tslcyh
+  domain: tslcyh.cn
+  verticals:
+  - general
+  search: https://tslcyh.cn/?s={q}
+  result_re: https://tslcyh\.cn/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://tslcyh.cn/?s={q} yield=4
+- name: vinmusic
+  domain: vinmusic.com
+  verticals:
+  - general
+  search: https://vinmusic.com/?s={q}
+  result_re: https://vinmusic\.com/[a-z0-9_-]+/[a-z0-9_-]+/[a-z0-9_-]+/[a-z0-9_-]+/
+  verified: true
+  note: probe https://vinmusic.com/?s={q} yield=15
+- name: 520switch
+  domain: www.520switch.com
+  verticals:
+  - general
+  search: https://www.520switch.com/?s={q}
+  result_re: https://www\.520switch\.com/[a-z0-9_-]+/\d+
+  verified: true
+  note: probe https://www.520switch.com/?s={q} yield=3
+- name: 8kmm
+  domain: www.8kmm.com
+  verticals:
+  - general
+  search: https://www.8kmm.com/?s={q}
+  result_re: https://www\.8kmm\.com/\d+\.html
+  verified: true
+  note: probe https://www.8kmm.com/?s={q} yield=1
+- name: deepdh
+  domain: www.deepdh.com
+  verticals:
+  - general
+  search: https://www.deepdh.com/?s={q}
+  result_re: https://www\.deepdh\.com/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.deepdh.com/?s={q} yield=1
 - name: gamer520
   domain: www.gamer520.com
   verticals:
-  - game
+  - general
   search: https://www.gamer520.com/?s={q}
   result_re: https://www\.gamer520\.com/\d+\.html
   verified: true
   note: probe https://www.gamer520.com/?s={q} yield=62
+- name: ghxi
+  domain: www.ghxi.com
+  verticals:
+  - general
+  search: https://www.ghxi.com/?s={q}
+  result_re: https://www\.ghxi\.com/[a-z0-9_-]+\.html
+  verified: true
+  note: probe https://www.ghxi.com/?s={q} yield=8
+- name: mairuan
+  domain: www.mairuan.com
+  verticals:
+  - general
+  search: https://www.mairuan.com/?s={q}
+  result_re: https://www\.mairuan\.com/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.mairuan.com/?s={q} yield=9
+- name: maoken
+  domain: www.maoken.com
+  verticals:
+  - general
+  search: https://www.maoken.com/?s={q}
+  result_re: https://www\.maoken\.com/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.maoken.com/?s={q} yield=4
+- name: meijug
+  domain: www.meijug.com
+  verticals:
+  - general
+  search: https://www.meijug.com/search.php?act=search&q={q}
+  result_re: https://www\.meijug\.com/[a-z0-9_-]+/\d+[a-z0-9_-]+\.html
+  verified: true
+  note: probe https://www.meijug.com/search.php?act=search&q={q} yield=26
+- name: moehui
+  domain: www.moehui.com
+  verticals:
+  - general
+  search: https://www.moehui.com/?s={q}
+  result_re: https://www\.moehui\.com/\d+\.html
+  verified: true
+  note: probe https://www.moehui.com/?s={q} yield=3
+- name: ns211
+  domain: www.ns211.com
+  verticals:
+  - general
+  search: https://www.ns211.com/?s={q}
+  result_re: https://www\.ns211\.com/\d+\.html
+  verified: true
+  note: probe https://www.ns211.com/?s={q} yield=2
+- name: s21
+  domain: www.s21.cn
+  verticals:
+  - general
+  search: https://www.s21.cn/?s={q}
+  result_re: https://www\.s21\.cn/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.s21.cn/?s={q} yield=12
+- name: sbrdh
+  domain: www.sbrdh.com
+  verticals:
+  - general
+  search: https://www.sbrdh.com/?s={q}
+  result_re: https://www\.sbrdh\.com/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.sbrdh.com/?s={q} yield=12
+- name: sgdhuo
+  domain: www.sgdhuo.com
+  verticals:
+  - general
+  search: https://www.sgdhuo.com/?s={q}
+  result_re: https://www\.sgdhuo\.com/[a-z0-9_-]+/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.sgdhuo.com/?s={q} yield=6
+- name: weizhongchou
+  domain: www.weizhongchou.cn
+  verticals:
+  - general
+  search: https://www.weizhongchou.cn/s.html?q={q}
+  result_re: https://www\.weizhongchou\.cn/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.weizhongchou.cn/s.html?q={q} yield=2
+- name: wwhcxx
+  domain: www.wwhcxx.net
+  verticals:
+  - general
+  search: https://www.wwhcxx.net/?s={q}
+  result_re: https://www\.wwhcxx\.net/\d+\.html
+  verified: true
+  note: probe https://www.wwhcxx.net/?s={q} yield=5
+- name: xzji
+  domain: www.xzji.com
+  verticals:
+  - general
+  search: https://www.xzji.com/search/?q={q}
+  result_re: https://www\.xzji\.com/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.xzji.com/search/?q={q} yield=4
+- name: zjnav
+  domain: www.zjnav.cc
+  verticals:
+  - general
+  search: https://www.zjnav.cc/?s={q}
+  result_re: https://www\.zjnav\.cc/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.zjnav.cc/?s={q} yield=9
+- name: x1g
+  domain: x1g.la
+  verticals:
+  - general
+  search: https://x1g.la/?s={q}
+  result_re: https://x1g\.la/[a-z0-9_-]+\.html
+  verified: true
+  note: probe https://x1g.la/?s={q} yield=5
+- name: 4mf
+  domain: www.4mf.net
+  verticals:
+  - movie
+  search: https://www.4mf.net/?s={q}
+  result_re: https://www\.4mf\.net/\d+\.html
+  verified: true
+  note: probe https://www.4mf.net/?s={q} yield=25
+- name: imf8
+  domain: www.imf8.cn
+  verticals:
+  - movie
+  search: https://www.imf8.cn/search.php?q={q}
+  result_re: https://www\.imf8\.cn/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.imf8.cn/search.php?q={q} yield=12
+- name: light4k
+  domain: www.light4k.top
+  verticals:
+  - movie
+  search: https://www.light4k.top/search.html?keyword={q}
+  result_re: https://www\.light4k\.top/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.light4k.top/search.html?keyword={q} yield=4
+- name: xiaozhongjishu
+  domain: www.xiaozhongjishu.com
+  verticals:
+  - movie
+  search: https://www.xiaozhongjishu.com/?s={q}
+  result_re: https://www\.xiaozhongjishu\.com/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.xiaozhongjishu.com/?s={q} yield=17
+- name: zjnav
+  domain: www.zjnav.com
+  verticals:
+  - movie
+  search: https://www.zjnav.com/?s={q}
+  result_re: https://www\.zjnav\.com/\d+\.html
+  verified: true
+  note: probe https://www.zjnav.com/?s={q} yield=8
 - name: foxirj
   domain: foxirj.com
   verticals:
@@ -123,14 +403,6 @@ sites:
   result_re: https://www\.dayanzai\.me/[a-z0-9_-]+\.html
   verified: true
   note: probe https://www.dayanzai.me?s={q} yield=4
-- name: ghxi
-  domain: www.ghxi.com
-  verticals:
-  - software
-  search: https://www.ghxi.com/?s={q}
-  result_re: https://www\.ghxi\.com/[a-z0-9_-]+\.html
-  verified: true
-  note: probe https://www.ghxi.com/?s={q} yield=8
 - name: iplaysoft
   domain: www.iplaysoft.com
   verticals:

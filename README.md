@@ -411,26 +411,40 @@ Discuz、DedeCMS、帝国 CMS…），并**自动推导详情页正则**，直�
  抽取 → 归一化 → 去重 → 验活 → 排序 → 输出(CLI / Web / JSON / CSV)
 ```
 
-### 数据源清单（2026-09-21，全部实测过产出）
+### 数据源清单（2026-09-22，全部实测过产出）
 
-| 适配器 | 可检索后端 | 数量 | 怎么扩容的（都是实测，不是估计） |
+| 适配器 | 可检索后端 | 数量 | 怎么来的（每一条都有实测依据） |
 |---|---|---|---|
-| `pansou` | 网盘聚合插件 | **107** | 官方 latest 镜像只带 74 个；`scripts/build-pansou.sh` 从源码重建，并补齐上游 `main.go` **从没接线过的 34 个插件**（实测「甄嬛传」百度链 28 → 41 条） |
-| `websearch` | 搜索引擎 | **6** | bing / baidu / ddg / sogou / so360 + **自建 SearXNG**（后者能到直连被 429/403 的 google/brave/qwant） |
-| `sitesearch` | 垂直资源站 | **20** | 用 B 环结果反查候选域名（85 个），再按"详情页真有链接"的判据探测，通过 7 个（jpsmile / macoshome / foxirj / cyx.im / adobeae / cgown / ittel） |
-| `apisources` | 公开 API | **11** | 学术/电子书/漫画/公版书：arxiv、crossref、openalex、mangadex、archive.org、openlibrary、europepmc、wikisource、plos、osf、doaj |
+| `pansou` | 网盘聚合插件 | **108** | 官方 latest 镜像只带 74 个；`scripts/build-pansou.sh` 从源码重建并补齐上游 `main.go` **从没接线过的 34 个插件**（含 `javdb`） |
+| `sitesearch` | 垂直资源站 | **54** | 先用本地 SearXNG / 直连引擎 / PanSou 结果反查候选域名，再用"详情页真有分享链接"的判据探测：346 个候选通过 28 个、69 个已知站通过 3 个（45 个站实测 yield≥2，9 个 yield=1 保留但会被运行时健康度淘汰） |
+| `apisources` | 公开 API | **18** | 学术/电子书/数据集/影视/动画：arxiv、crossref、openalex、europepmc、plos、doaj、osf、zenodo、datacite、figshare、archive.org、openlibrary、gutendex、wikisource、kitsu、tvmaze、yts、mangadex。为此给 API 层加了 **POST body、顶层数组、HTML link_re、per-API headers** 四种能力 |
+| `websearch` | 搜索引擎 | **8** | bing / baidu / ddg / sogou / so360 / naver / toutiao + **自建 SearXNG**（一个后端换十几个引擎，含直连被 429/403 的 google/brave/qwant） |
+| `btsearch` | BT / 磁力站 | **4** | nyaa（75 magnet）、dmhy（46）、mikan（41）、sukebei（75）；搜索页直出 magnet，标题取 `dn=` 或行内文本 |
 | `bilibili` | B 站三路 | **3** | WBI 签名 + 游客 cookie → 视频简介 / 评论区（含置顶与楼中楼）/ 专栏摘要 |
-| `btsearch` | BT / 磁力站 | **2** | nyaa（75 条 magnet）、dmhy（46 条）；标题从 magnet 的 dn= 或行内文本取 |
 | `telegram` | TG 频道 | **430** | 本地 SQLite 索引（628k 消息 / 271k 含链接） |
 
-**自己写的后端（不含 PanSou 插件与 TG 频道）：20 → 42 个（2.1 倍）**；
-含 PanSou 插件与频道后总数 88 → 149。
+**自己写的后端（不含 PanSou 插件与 TG 频道）：43 → 87 个（2.0 倍）**；
+含 PanSou 插件后总数 151 → 195。
 
-**不收的源（同样实测过，避免滥竽充数）**：youtube / csdn / 贴吧 / 豆瓣 / 简书 / 博客园 / 微博 /
-微信公众号（0 条链接或反爬）、1337x / btdig / bt4g / torrentz（403/429/空页）、
-scielo / semantic scholar / dblp / zenodo / doaj 之外的学术接口（0 产出或非 JSON）、
-155 个候选站的绝大部分（探测显示详情页没有分享链接）。
+#### 成人内容源：默认开启，可一键过滤
 
+`javdb`（PanSou 插件）与 `sukebei`（nyaa 成人分区）**默认启用**，
+过滤交给 `--sfw`，而不是在构建阶段把插件删掉：
+
+```bash
+pansearch search "SSIS-001"          # 默认包含成人源（javdb 一路实测 154 条）
+pansearch search "SSIS-001" --sfw    # 按来源剔除成人源命中（会显示"已过滤 N 条"）
+```
+
+标记写在 `config/sources.yaml` 的 `adult_sources`（`plugin:javdb` / `bt:sukebei`）。
+**按来源标签过滤而不是按标题关键词猜**：靠标题猜既会漏（缩写、外语），
+也会误伤正常资源（"写真集""深夜剧"这类）。
+
+**不收的源（同样实测过，避免滥竽充数）**：youtube / csdn / 贴吧 / 豆瓣 / 简书 / 博客园 /
+微博 / 微信公众号（0 条链接或反爬）、1337x / btdig / bt4g / torrentz / acgnx / tokyotosho
+（403/429/空页）、semantic scholar / core / opensubtitles / tmdb / omdb（需 key 或 429）、
+jikan（504）、hathitrust（403）、standardebooks 与 gutenberg 的 HTML 搜索页（JS 渲染、
+首屏抽不到链接）、以及 300+ 个探测后确认"详情页没有分享链接"的候选站。
 ### 目录
 
 ```

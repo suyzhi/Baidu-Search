@@ -73,15 +73,47 @@ def dig(obj: Any, path: str | None) -> Any:
     return cur
 
 
+def _html_items(text: str, cfg: dict) -> list[tuple[str, str]]:
+    """HTML 搜索页：用配置里的 link_re 抽链接（顺带用锚文本当标题）。
+
+    为什么需要：Standard Ebooks / Project Gutenberg 这类站点只有 HTML 搜索页，
+    没有 JSON API，但搜索页结构极稳（全是 <a href="/ebooks/...">标题</a>）。
+    与其为每个站写适配器，不如给 API 层加一个"正则取链接"的格式。
+    """
+    pattern = str(cfg.get("link_re") or "")
+    if not pattern:
+        return []
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    try:
+        rx = re.compile(pattern, re.I)
+    except re.error:
+        return []
+    for m in rx.finditer(text):
+        href = next((g for g in m.groups() if g), None) or m.group(0)
+        base = str(cfg.get("base") or "")
+        link = href if href.startswith(("http://", "https://")) else base + href
+        if link in seen:
+            continue
+        seen.add(link)
+        title = re.sub(r"<[^>]+>", " ", m.group(0))
+        title = html_mod.unescape(" ".join(title.split()))[:300]
+        out.append((link, title))
+    return out
+
+
 def dig_list(obj: Any, path: str | None) -> list[Any]:
     """按点路径取**列表**。
 
     必须和 dig() 分开：dig() 会把列表展开成第一个元素（那是"取字段"的语义），
     用它取 items 只会拿到 1 条 —— 实测 crossref/openalex 各返回 20 条却只出 1 条。
     """
+    cur = obj
+    # "$" = 响应本身就是数组（tvmaze / figshare 这种）
+    if path is not None and str(path).strip() in ("$", "*"):
+        return cur if isinstance(cur, list) else []
     if not path:
         return []
-    cur = obj
     for part in str(path).split("."):
         if isinstance(cur, dict):
             cur = cur.get(part)
@@ -230,11 +262,24 @@ class ApiSourcesAdapter(Adapter):
                     await asyncio.sleep(min(wait, interval))
                 self._last_call[name] = time.monotonic()
 
+        # 个别 API 对 Accept 敏感：Kitsu（JSON:API）不带 vnd.api+json 直接 406。
+        # 所以 config 里可以给单个 API 覆盖请求头，而不用为它写一个适配器。
+        headers = {"User-Agent": UA, "Accept": "application/json, text/xml, */*"}
+        headers.update({str(k): str(v) for k, v in (api.get("headers") or {}).items()})
+        # POST 型 API（figshare 这类检索接口只收 POST body）：
+        # body 里同样支持 {q}，与 url 模板保持一致的写法。
+        method = str(api.get("method") or "get").upper()
         try:
-            resp = await client.get(
-                url, timeout=float(api.get("timeout") or 15),
-                headers={"User-Agent": UA, "Accept": "application/json, text/xml, */*"},
-            )
+            if method == "POST":
+                payload = str(api.get("body") or "{}").replace("{q}", kw)
+                headers.setdefault("Content-Type", "application/json")
+                resp = await client.post(url, content=payload.encode("utf-8"),
+                                         timeout=float(api.get("timeout") or 15),
+                                         headers=headers)
+            else:
+                resp = await client.get(
+                    url, timeout=float(api.get("timeout") or 15), headers=headers,
+                )
         except httpx.HTTPError:
             return []
         if resp.status_code == 429:
@@ -244,6 +289,14 @@ class ApiSourcesAdapter(Adapter):
             return []
 
         hits: list[RawHit] = []
+        if str(api.get("format") or "").lower() == "html":
+            for link, title in _html_items(resp.text, api):
+                if not link.startswith(("http://", "https://")):
+                    continue
+                hits.append(RawHit(source=f"api:{name}", kind="api", url=link,
+                                   title=title or None, origin=url))
+            return hits
+
         for item in parse_items(resp.text, api):
             link = build_link(item, api)
             if not link:

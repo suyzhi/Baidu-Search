@@ -166,10 +166,20 @@ def test_shipped_api_config_is_valid():
     apis = _load_apis()
     assert apis, "config/apis.yaml 里的 API 都不可用？"
     for api in apis:
-        assert api.get("url") and "{q}" in api["url"], api.get("name")
-        assert api.get("items"), api.get("name")
-        assert api.get("link") or api.get("link_template"), api.get("name")
-        assert api.get("vertical"), api.get("name")
+        name = api.get("name")
+        # 关键词可以落在 URL（GET）或 body（POST，figshare 这类检索接口只收 POST）
+        if str(api.get("method") or "get").upper() == "POST":
+            assert api.get("url"), name
+            assert "{q}" in str(api.get("body") or ""), f"{name}: POST 的查询词必须写在 body 里"
+        else:
+            assert api.get("url") and "{q}" in api["url"], name
+        # HTML 搜索页用 link_re 抽链接，不需要 items
+        if str(api.get("format") or "").lower() == "html":
+            assert api.get("link_re"), f"{name}: html 格式必须给 link_re"
+        else:
+            assert api.get("items"), name
+            assert api.get("link") or api.get("link_template"), name
+        assert api.get("vertical"), name
 
 
 def test_direct_pan_type_is_registered():

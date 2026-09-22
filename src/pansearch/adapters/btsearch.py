@@ -53,6 +53,21 @@ DEFAULT_SITES: list[dict] = [
         "search": "https://share.dmhy.org/topics/list?keyword={q}",
         "verticals": ["anime", "music"],
     },
+    {
+        # 蜜柑计划：动画 BT，搜索页直出 41 条 magnet（实测 2026-09-21），零 Header。
+        # 以前它只在 sites.yaml 里走"两阶段"路径（搜索页→详情页），多绕一层还更慢。
+        "name": "mikan",
+        "search": "https://mikanani.me/Home/Search?searchstr={q}",
+        "verticals": ["anime"],
+    },
+    {
+        # sukebei = nyaa 的成人分区。实测（2026-09-21）搜索页直出 magnet。
+        # 默认**开启**；要过滤用 pansearch search --sfw（见 config/sources.yaml 的 adult_sources）。
+        "name": "sukebei",
+        "search": "https://sukebei.nyaa.si/?f=0&c=0_0&q={q}",
+        "verticals": ["general", "anime", "movie"],
+        "adult": True,
+    },
 ]
 
 _MAGNET_ATTR_RE = re.compile(r"magnet:\?[^\"'\s<>]+")

@@ -121,15 +121,22 @@ class SiteSearchAdapter(Adapter):
         disabled = self._health.disabled() if self._health else set()
         verticals = set(classify(kw)) or {GENERAL_VERTICAL}
 
-        picked: list[SiteEntry] = []
+        scored: list[tuple[int, int, str, SiteEntry]] = []
         for entry in catalog:
             if not (entry.search and entry.result_re and entry.verified):
                 continue
             if entry.host in disabled:
                 continue
             site_v = set(entry.verticals) or {GENERAL_VERTICAL}
-            if site_v & verticals or GENERAL_VERTICAL in site_v:
-                picked.append(entry)
+            specific = bool(site_v & verticals)
+            if not specific and GENERAL_VERTICAL not in site_v:
+                continue
+            # 排序键：① 垂直命中优先（通用站不能把垂直站挤掉）
+            #          ② 探测产出高的优先（yield 来自 probe，是真实测出来的）
+            scored.append((0 if specific else 1, -entry.link_yield, entry.name, entry))
+
+        scored.sort(key=lambda x: x[:3])
+        picked = [entry for _, _, _, entry in scored]
 
         # 配置里显式给的站点优先（便于临时测试某个站）
         explicit = self.cfg.get("sites")
