@@ -6,7 +6,9 @@
 # 命中率完全不同 —— 等于用一个后端换回十几个引擎。
 use_default_settings: true
 server:
-  secret_key: "pansearch-local-searxng-change-me"
+  # 这是**模板**：真实密钥由 scripts/start-searxng.sh 首次启动时随机生成，
+  # 写到 .cache/searxng/settings.yml 再挂进容器 —— 仓库里不留任何真实密钥。
+  secret_key: "CHANGEME-generated-by-start-searxng.sh"
   limiter: false
   image_proxy: false
 search:
