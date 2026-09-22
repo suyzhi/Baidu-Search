@@ -45,7 +45,12 @@ cd pan-sousuo
 uv venv && uv pip install -e ".[web,dev]"
 
 # ① 先把 PanSou 聚合引擎跑起来（强烈推荐，召回差 7 倍）
+./scripts/build-pansou.sh          # 可选但强烈建议：官方镜像只带 74 个插件，
+                                   # 源码里还有 35 个没接线的 —— 自建后 107 个
 ./scripts/start-pansou.sh          # 需要 colima：brew install colima docker
+
+# ①.5 自建 SearXNG（可选）：一个后端换回十几个引擎（含直连被墙的 Google）
+./scripts/start-searxng.sh         # 端口 8889，配置在 config/searxng/settings.yml
 
 # ② 建立 TG 频道索引（召回主力，越深越全）
 .venv/bin/pansearch index crawl --pages 3             # 136 频道 × 3 页 ≈ 30 秒
@@ -362,22 +367,47 @@ Discuz、DedeCMS、帝国 CMS…），并**自动推导详情页正则**，直�
 ```
         ┌──────────────── 输入：关键词 ────────────────┐
         ▼
- A 环  PanSou 聚合引擎     48 个网盘搜索插件 + 上千 TG 频道   ← 覆盖广，但会限流
- B 环  搜索引擎定向检索     Bing / DDG / 搜狗 → 内容页 → 抓页面  ← 捞"野链接"，含贴吧/公众号
- C 环  Telegram 频道索引    136 频道直连 t.me + 本地 SQLite    ← **召回主力，0.02s**
- C 环  B 站内搜（WBI 签名） 视频简介 + 评论区 + 专栏摘要        ← 资源贴真实产地，实测 6.9s / 14 条百度链
+ A 环  PanSou 聚合引擎     107 个网盘搜索插件 + 110 TG 频道   ← 覆盖广，但会限流
+ B 环  搜索引擎定向检索     6 个引擎 → 内容页 → 抓页面         ← 含自建 SearXNG（能到 Google）
+ C 环  Telegram 频道索引     430 频道直连 t.me + 本地 SQLite     ← **召回主力，0.02s**
+ C 环  B 站内搜（WBI 签名）  视频简介 + 评论区 + 专栏摘要        ← 资源贴真实产地
+ C 环  BT / 磁力站           nyaa + dmhy（搜索页直出 magnet）    ← 磁力链路的直接产地
+ D 环  公开 API 数据源       11 个（学术 / 电子书 / 漫画 / 公版书）
+ E 环  垂直资源站目录        20 个站（探测验证过"详情页真有链接"才收录）
  D 环  本地私有索引         SQLite 验活缓存 + TG 消息沉淀      ← 越用越全
         │
         ▼
  抽取 → 归一化 → 去重 → 验活 → 排序 → 输出(CLI / Web / JSON / CSV)
 ```
 
+### 数据源清单（2026-09-21，全部实测过产出）
+
+| 适配器 | 可检索后端 | 数量 | 怎么扩容的（都是实测，不是估计） |
+|---|---|---|---|
+| `pansou` | 网盘聚合插件 | **107** | 官方 latest 镜像只带 74 个；`scripts/build-pansou.sh` 从源码重建，并补齐上游 `main.go` **从没接线过的 34 个插件**（实测「甄嬛传」百度链 28 → 41 条） |
+| `websearch` | 搜索引擎 | **6** | bing / baidu / ddg / sogou / so360 + **自建 SearXNG**（后者能到直连被 429/403 的 google/brave/qwant） |
+| `sitesearch` | 垂直资源站 | **20** | 用 B 环结果反查候选域名（85 个），再按"详情页真有链接"的判据探测，通过 7 个（jpsmile / macoshome / foxirj / cyx.im / adobeae / cgown / ittel） |
+| `apisources` | 公开 API | **11** | 学术/电子书/漫画/公版书：arxiv、crossref、openalex、mangadex、archive.org、openlibrary、europepmc、wikisource、plos、osf、doaj |
+| `bilibili` | B 站三路 | **3** | WBI 签名 + 游客 cookie → 视频简介 / 评论区（含置顶与楼中楼）/ 专栏摘要 |
+| `btsearch` | BT / 磁力站 | **2** | nyaa（75 条 magnet）、dmhy（46 条）；标题从 magnet 的 dn= 或行内文本取 |
+| `telegram` | TG 频道 | **430** | 本地 SQLite 索引（628k 消息 / 271k 含链接） |
+
+**自己写的后端（不含 PanSou 插件与 TG 频道）：20 → 42 个（2.1 倍）**；
+含 PanSou 插件与频道后总数 88 → 149。
+
+**不收的源（同样实测过，避免滥竽充数）**：youtube / csdn / 贴吧 / 豆瓣 / 简书 / 博客园 / 微博 /
+微信公众号（0 条链接或反爬）、1337x / btdig / bt4g / torrentz（403/429/空页）、
+scielo / semantic scholar / dblp / zenodo / doaj 之外的学术接口（0 产出或非 JSON）、
+155 个候选站的绝大部分（探测显示详情页没有分享链接）。
+
 ### 目录
 
 ```
 pan-sousuo/
 ├── scripts/
-│   └── start-pansou.sh       # 一键自建 PanSou（colima + Docker）
+│   ├── build-pansou.sh       # 从源码自建 PanSou（补齐上游没接线的 35 个插件）
+│   ├── start-pansou.sh       # 一键自建 PanSou（colima + Docker）
+│   └── start-searxng.sh      # 自建 SearXNG（一个后端换十几个引擎）
 ├── config/
 │   ├── sources.yaml          # 数据源开关 / 权重 / 限速 / 各源 deadline
 │   ├── tg_channels.txt       # 389 个 TG 网盘分享频道（跨领域）

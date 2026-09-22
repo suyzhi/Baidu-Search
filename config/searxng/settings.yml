@@ -1,0 +1,20 @@
+# SearXNG 最小配置：只做一件事 —— 打开 JSON 输出，让 pansearch 能像用
+# Bing/DDG 一样把 searxng 当成一个"引擎"接进 B 环。
+#
+# 为什么需要它：直连时 google/qwant/brave/mojeek 这些引擎分别返回 429/403/空页
+# （实测见 config/sources.yaml 的注释），而 SearXNG 从服务端去请求它们，
+# 命中率完全不同 —— 等于用一个后端换回十几个引擎。
+use_default_settings: true
+server:
+  secret_key: "pansearch-local-searxng-change-me"
+  limiter: false
+  image_proxy: false
+search:
+  # 关键：默认只有 html，不开 json 的话 /search?format=json 直接 403
+  formats:
+    - html
+    - json
+  safe_search: 0
+  autocomplete: ""
+ui:
+  static_use_hash: true

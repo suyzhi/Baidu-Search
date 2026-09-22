@@ -25,7 +25,15 @@ sites:
   search: https://looptorrent.net/?s={q}
   result_re: https://looptorrent\.net/[a-z0-9_-]+/
   verified: true
-  note: probe https://looptorrent.net/?s={q} yield=9
+  note: probe https://looptorrent.net/?s={q} yield=10
+- name: macoshome
+  domain: macoshome.com
+  verticals:
+  - audio-tool
+  search: https://macoshome.com/?s={q}
+  result_re: https://macoshome\.com/[a-z0-9_-]+/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://macoshome.com/?s={q} yield=2
 - name: plugintorrent
   domain: plugintorrent.com
   verticals:
@@ -43,6 +51,30 @@ sites:
   result_re: https://vstorrent\.org/[a-z0-9_-]+/
   verified: true
   note: probe https://vstorrent.org/?s={q} yield=30
+- name: jpsmile
+  domain: jpsmile.com
+  verticals:
+  - design
+  search: https://jpsmile.com/?s={q}
+  result_re: https://jpsmile\.com/[a-z0-9_-]+/
+  verified: true
+  note: probe https://jpsmile.com/?s={q} yield=4
+- name: adobeae
+  domain: www.adobeae.com
+  verticals:
+  - design
+  search: https://www.adobeae.com?s={q}
+  result_re: https://www\.adobeae\.com/\d+\-[a-z0-9_-]+/
+  verified: true
+  note: probe https://www.adobeae.com?s={q} yield=6
+- name: cgown
+  domain: www.cgown.com
+  verticals:
+  - design
+  search: https://www.cgown.com?s={q}
+  result_re: https://www\.cgown\.com/[a-z0-9_-]+/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.cgown.com?s={q} yield=4
 - name: bookfere
   domain: bookfere.com
   verticals:
@@ -51,6 +83,14 @@ sites:
   result_re: https://bookfere\.com/[a-z0-9_-]+/\d+\.html
   verified: true
   note: probe https://bookfere.com/?s={q} yield=9
+- name: cyx
+  domain: cyx.im
+  verticals:
+  - game
+  search: https://cyx.im/search/{q}
+  result_re: https://cyx\.im/[a-z0-9_-]+\.html
+  verified: true
+  note: probe https://cyx.im/search/{q} yield=2
 - name: gamer520
   domain: www.gamer520.com
   verticals:
@@ -59,6 +99,14 @@ sites:
   result_re: https://www\.gamer520\.com/\d+\.html
   verified: true
   note: probe https://www.gamer520.com/?s={q} yield=62
+- name: foxirj
+  domain: foxirj.com
+  verticals:
+  - software
+  search: https://foxirj.com/?s={q}
+  result_re: https://foxirj\.com/[a-z0-9_-]+\.html
+  verified: true
+  note: probe https://foxirj.com/?s={q} yield=6
 - name: 423down
   domain: www.423down.com
   verticals:
@@ -91,6 +139,14 @@ sites:
   result_re: https://www\.iplaysoft\.com/[a-z0-9_-]+/\d+
   verified: true
   note: probe https://www.iplaysoft.com/?s={q} yield=1
+- name: ittel
+  domain: www.ittel.cn
+  verticals:
+  - software
+  search: https://www.ittel.cn/?s={q}
+  result_re: https://www\.ittel\.cn/[a-z0-9_-]+/\d+\.html
+  verified: true
+  note: probe https://www.ittel.cn/?s={q} yield=8
 - name: puresys
   domain: www.puresys.net
   verticals:
@@ -98,7 +154,7 @@ sites:
   search: https://www.puresys.net/?s={q}
   result_re: https://www\.puresys\.net/\d+\.html
   verified: true
-  note: probe https://www.puresys.net/?s={q} yield=2
+  note: probe https://www.puresys.net/?s={q} yield=4
 - name: ypojie
   domain: www.ypojie.com
   verticals:

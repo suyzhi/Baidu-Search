@@ -60,6 +60,22 @@ sources:
       - "{kw} 百度网盘"
       - "{kw} 资源 提取码"
 
+
+  # ---- D 环：BT / 磁力站（磁力链接的直接产地）----
+  # 为什么单列：BT 站的搜索页**就是**结果页（magnet 直接在行内），与 sitesearch 的
+  # "搜索页→详情页"两阶段模型不同；标题要从 magnet 的 dn= 里取，否则打分判低相关。
+  # 实测（关键词「三体」）：nyaa 75 条 magnet、dmhy 46 条；1337x 403 / btdig 429 不收。
+  btsearch:
+    enabled: true
+    kind: bt
+    weight: 0.6
+    deadline: 12
+    concurrency: 3
+    rate_limit_qps: 1.5
+    max_sites: 6
+    page_timeout: 10
+    page_concurrency: 4
+
   # ---- C 环：Telegram 频道（本地索引直连）----
   # 全网网盘链接的主要产地。直连 t.me，不经第三方，可并行上百频道 + 向历史翻页。
   # 首次搜索若索引为空会自动抓一轮；之后用 pansearch index crawl 持续加深。
@@ -125,17 +141,33 @@ sources:
     kind: websearch
     weight: 0.6
     timeout: 25
-    deadline: 9               # 与 PanSou 并行，9s 不会成为关键路径（PanSou 20s）
-    concurrency: 3
-    rate_limit_qps: 1.5
+    # 6 个引擎 × 3 个模板 = 18 次搜索请求 + 阶段 2 抓页，9s 会被砍成"降级"；
+    # 实测 12s + 并发 5 能跑完，且仍与 PanSou（20s）并行、不成为关键路径。
+    deadline: 12
+    concurrency: 5
+    rate_limit_qps: 2.5
     fetch_result_pages: true  # 阶段 2：抓内容页（召回主力，比阶段 1 值钱）
     max_pages: 12
     page_timeout: 8
     page_concurrency: 8
     engines:
+      # 复测（2026-09-21，模板 "{kw} 百度网盘 提取码"）：
+      #   baidu  983KB，结果页直接带 3 条 pan 链 + 59 个候选内容页 ✅
+      #   bing    94KB，15 个候选内容页                          ✅
+      #   ddg     31KB，结果页直接带 2 条 pan 链                 ✅
+      #   sogou  466KB/5KB 波动（限流时几乎空页），保留但排最后  ⚠️
+      #   so.com 352KB，19 个候选内容页（无直接链）              ⚠️ 备选
+      #   brave 429 / ecosia 403 / yandex·mojeek·searx·marginalia·startpage 零结果 ❌
       bing: "https://cn.bing.com/search?q={q}"
+      baidu: "https://www.baidu.com/s?wd={q}"
       ddg: "https://html.duckduckgo.com/html/?q={q}"
       sogou: "https://www.sogou.com/web?query={q}"
+      so360: "https://www.so.com/s?q={q}"
+      # 自建 SearXNG（scripts/start-searxng.sh）：**一个后端换回十几个引擎**，
+      # 包括直连时 429/403 的 google/brave/qwant/mojeek。
+      # 实测（2026-09-21，"三体 百度网盘"）：20 条结果，其中 6 条带 pan 链，
+      # 还带出 rrdynb/zaodianying/ewang100 这类"资源讨论页"，正是阶段 2 要抓的。
+      searxng: "http://127.0.0.1:8889/search?q={q}&format=json"
     templates:
       # 引擎不索引 pan.baidu.com/s 本身，但**索引"资源讨论页"**；
       # 这三条模板同时覆盖"搜索结果页直接带链接"和"找到讨论页再跟进"两条路。
@@ -173,6 +205,9 @@ scoring:
     api: 0.95
     bilibili: 0.8
     forum: 0.8
+    # BT / 磁力站：磁力不需要提取码也不用验活，但稀有度/可信度低于网盘分享，
+    # 且大量是"字幕组压片"，所以权重压在论坛之下、搜索引擎之上。
+    bt: 0.55
     websearch: 0.6
   status_weight:
     alive: 1.0            # 提取码已验证正确

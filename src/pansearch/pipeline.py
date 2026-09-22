@@ -13,6 +13,7 @@ import httpx
 from .adapters import REGISTRY
 from .adapters import apisources as _apisources  # noqa: F401  触发注册
 from .adapters import bilibili as _bilibili  # noqa: F401  触发注册
+from .adapters import btsearch as _btsearch  # noqa: F401  触发注册
 from .adapters import pansou as _pansou  # noqa: F401  触发注册
 from .adapters import sitesearch as _sitesearch  # noqa: F401  触发注册
 from .adapters import telegram as _telegram  # noqa: F401  触发注册

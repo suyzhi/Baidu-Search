@@ -58,3 +58,80 @@ apis:
     items: data
     title: attributes.title.en
     link_template: "https://mangadex.org/title/{id}"
+
+  # ---- 以下 4 个 API 于 2026-09-21 逐个实测收录（括号内为当次响应的命中数）----
+  # 电子书 / 学术领域的公开 API：结构化、无需 key、长期稳定。
+  - name: archive_org
+    vertical: ebook,academic
+    enabled: true
+    weight: 0.7
+    url: "https://archive.org/advancedsearch.php?q={q}&fl[]=identifier&fl[]=title&rows=20&output=json"
+    format: json
+    items: response.docs
+    title: title
+    link_template: "https://archive.org/details/{identifier}"
+
+  - name: openlibrary
+    vertical: ebook
+    enabled: true
+    weight: 0.6
+    url: "https://openlibrary.org/search.json?q={q}&limit=20"
+    format: json
+    items: docs
+    title: title
+    link_template: "https://openlibrary.org{key}"
+
+  - name: europepmc
+    vertical: academic
+    enabled: true
+    weight: 0.7
+    url: "https://www.ebi.ac.uk/europepmc/webservices/rest/search?query={q}&format=json&pageSize=20"
+    format: json
+    items: resultList.result
+    title: title
+    link_template: "https://europepmc.org/article/{source}/{id}"
+
+  # 中文公版书/古籍全文检索（维基文库）。实测 "论语" 命中 6 条。
+  - name: wikisource_zh
+    vertical: ebook
+    enabled: true
+    weight: 0.6
+    url: "https://zh.wikisource.org/w/api.php?action=query&list=search&srsearch={q}&format=json"
+    format: json
+    items: query.search
+    title: title
+    link_template: "https://zh.wikisource.org/wiki/{title}"
+
+  # ---- 再补几个学术 API（2026-09-21 逐个实测命中数）----
+  # 实测**没有产出**因而不收的：pubmed（返回的是裸 ID 列表，拿不到可点链接）、
+  # openaire（结构随版本变动，抽不到标题/链接）、semantic scholar（429）、
+  # scielo（403）、dblp（非 JSON）。不收它们是不想让"源"的数字好看但结果变差。
+  - name: plos
+    vertical: academic
+    enabled: true
+    weight: 0.7
+    url: "https://api.plos.org/search?q={q}&rows=20&fl=id,title"
+    format: json
+    items: response.docs
+    title: title
+    link_template: "https://journals.plos.org/plosone/article?id={id}"
+
+  - name: osf
+    vertical: academic
+    enabled: true
+    weight: 0.6
+    url: "https://api.osf.io/v2/nodes/?filter[title]={q}&page[size]=20"
+    format: json
+    items: data
+    title: attributes.title
+    link_template: "https://osf.io/{id}/"
+
+  - name: doaj
+    vertical: academic
+    enabled: true
+    weight: 0.6
+    url: "https://doaj.org/api/search/articles/{q}?pageSize=20"
+    format: json
+    items: results
+    title: bibjson.title
+    link_template: "https://doaj.org/article/{id}"
