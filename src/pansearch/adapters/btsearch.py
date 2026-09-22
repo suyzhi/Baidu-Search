@@ -45,6 +45,9 @@ DEFAULT_SITES: list[dict] = [
     {
         "name": "nyaa",
         "search": "https://nyaa.si/?f=0&c=0_0&q={q}",
+        # 单站超时：nyaa 实测要 9.6s（偶发 504 还要再来一次），是整源的瓶颈。
+        # 给它单独收在 8s，慢的时候牺牲它自己，不给其它站和整次搜索拖后腿。
+        "timeout": 8,
         # audio-tool 也归进来：VST / 音源 / 采样包的 BT 发布大量在 nyaa
         "verticals": ["anime", "movie", "music", "game", "software", "audio-tool"],
     },
@@ -213,8 +216,9 @@ class BtSearchAdapter(Adapter):
     async def _one_site(self, site: dict, kw: str, client: httpx.AsyncClient) -> list[RawHit]:
         name = site.get("name") or "bt"
         url = str(site["search"]).format(q=urllib.parse.quote(kw))
+        site_timeout = float(site.get("timeout") or self.page_timeout)
         async with self.sem:
-            resp = await self._get(client, url)
+            resp = await self._get(client, url, timeout=site_timeout)
         if resp is None or resp.status_code != 200:
             return []
 

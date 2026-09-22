@@ -26,10 +26,11 @@ sources:
       - https://so.252035.xyz
     weight: 1.0
     timeout: 20
-    # 截止时间必须收着给：主查询与补搜查询是并行的，各自都会吃满这个上限。
-    # 实测设 45s 时，一次 PanSou 卡顿会让整体搜索变成 45s(等待) + 验活 ≈ 52s。
-    # 正常情况抓取只要 4.2s（热缓存 0.2s），20s 足够覆盖冷启动。
-    deadline: 20
+    # 截止时间要能覆盖"冷查询"：实测冷查询（容器刚起/关键词首次）要 19s+，
+    # 设 20s 会**刚好卡在边界上超时** —— 表现就是界面上那句
+    # "pansou: 实例超时"，而其实再等两三秒就有结果。热缓存只要 0.2s。
+    # 28s = 冷查询 ~19s + 降级到公共实例的余量；它只影响最慢的那次，不影响热查询。
+    deadline: 28
     retries: 0            # 自建实例失败就直接降级到公共实例，不必重试
     concurrency: 2
     rate_limit_qps: 5.0
@@ -69,10 +70,12 @@ sources:
     enabled: true
     kind: bt
     weight: 0.6
-    deadline: 12
-    concurrency: 3
+    # nyaa 单站就要 ~9.6s（实测），4 个站并发打时 12s 预算会被砍掉整源；
+    # deadline 15s + 每查询最多 4 站（nyaa / dmhy / mikan / sukebei 按垂直命中挑）。
+    deadline: 15
+    concurrency: 4
     rate_limit_qps: 1.5
-    max_sites: 6
+    max_sites: 4
     page_timeout: 10
     page_concurrency: 4
 
@@ -115,11 +118,12 @@ sources:
     # 实测这一源单次要 13~29 秒，却只回 0~17 条（Serum 合成器 28 秒回 1 条），
     # 而同期的 telegram 0.4 秒回 131 条。它长期是整条链路的关键路径。
     # 砍到 12 秒：慢站拿不到就算了，不再让它一个人决定整次搜索要等多久。
-    deadline: 12
-    # 目录扩到 50+ 个站之后：并发 4→8、每查询站点数 12→16，
-    # 保证"垂直站 + 高产出站"都能在 12 秒预算内轮到。
+    # 目录 54 个站，但**每次查询只打 10 个**（垂直命中优先、再按探测 yield 排序）。
+    # 上轮试过 16 个：实测频繁 12s 预算跑不完 → 整源超时、返回 0 条，
+    # 反而不如少打几个把结果拿回来。
+    deadline: 15
     concurrency: 8          # 同时打几个站
-    max_sites: 16           # 每个查询最多打几个站（按 垂直命中 → 探测 yield 排序）
+    max_sites: 10           # 每个查询最多打几个站
     max_pages: 4            # 每个站最多跟进几个详情页（再多收益很小）
     page_timeout: 12
     page_concurrency: 10
@@ -144,11 +148,14 @@ sources:
     kind: websearch
     weight: 0.6
     timeout: 25
-    # 6 个引擎 × 3 个模板 = 18 次搜索请求 + 阶段 2 抓页，9s 会被砍成"降级"；
-    # 实测 12s + 并发 5 能跑完，且仍与 PanSou（20s）并行、不成为关键路径。
-    deadline: 12
-    concurrency: 5
-    rate_limit_qps: 2.5
+    # 8 个引擎 × 3 个模板 = 24 次搜索请求 + 阶段 2 抓页 —— 实测 12s 根本跑不完，
+    # 整源被砍成"超时/降级"（界面上那一串告警就是这么来的）。改成：
+    #   模板 3 → 2（去掉产出最差的 'site:tieba...'，它已被前两条覆盖）
+    #   deadline 12 → 15，并发 5 → 8
+    # 让"每次都真的跑到结果"，而不是每次都刚好被截断。
+    deadline: 15
+    concurrency: 8
+    rate_limit_qps: 3.0
     fetch_result_pages: true  # 阶段 2：抓内容页（召回主力，比阶段 1 值钱）
     max_pages: 12
     page_timeout: 8
@@ -179,10 +186,11 @@ sources:
       searxng: "http://127.0.0.1:8889/search?q={q}&format=json"
     templates:
       # 引擎不索引 pan.baidu.com/s 本身，但**索引"资源讨论页"**；
-      # 这三条模板同时覆盖"搜索结果页直接带链接"和"找到讨论页再跟进"两条路。
+      # 两条模板覆盖"结果页直接带链接"和"找到讨论页再跟进"。
+      # 去掉 'site:tieba.baidu.com {kw}'：它是 8 个引擎各发一次的固定成本，
+      # 而贴吧帖子本来就会被前两条模板带出来（bing/baidu 对中文资源词的召回里常有 tieba）。
       - '{kw} 百度网盘'
       - '{kw} 网盘 提取码 分享'
-      - 'site:tieba.baidu.com {kw}'
 
 verify:
   enabled: true

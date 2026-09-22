@@ -71,7 +71,9 @@ docker run -d --name pansou --restart unless-stopped \
   -e ENABLED_PLUGINS="$PLUGINS" \
   -e CACHE_ENABLED=true -e CACHE_TTL=300 \
   -e ASYNC_PLUGIN_ENABLED=true \
-  -e ASYNC_RESPONSE_TIMEOUT="${PANSOU_ASYNC_TIMEOUT:-10}" \
+  # 8s：4s 会让"慢一点的插件"（多数百度类）整批掉出响应（实测 Omnisphere 只剩 12 条），
+  # 10s 又让每次冷查询都要等满 10s；8s 是实测下来"拿得全 + 别太慢"的折中。
+  -e ASYNC_RESPONSE_TIMEOUT="${PANSOU_ASYNC_TIMEOUT:-8}" \
   -e ASYNC_CACHE_TTL_HOURS=6 \
   -e ASYNC_MAX_BACKGROUND_WORKERS=80 \
   "$IMAGE"
