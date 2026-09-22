@@ -29,8 +29,8 @@ sources:
     # 截止时间要能覆盖"冷查询"：实测冷查询（容器刚起/关键词首次）要 19s+，
     # 设 20s 会**刚好卡在边界上超时** —— 表现就是界面上那句
     # "pansou: 实例超时"，而其实再等两三秒就有结果。热缓存只要 0.2s。
-    # 28s = 冷查询 ~19s + 降级到公共实例的余量；它只影响最慢的那次，不影响热查询。
-    deadline: 28
+    # 30s = 冷查询 ~19s + 降级到公共实例的余量；只影响最慢的那次，热查询仍是 0.2s。
+    deadline: 30
     retries: 0            # 自建实例失败就直接降级到公共实例，不必重试
     concurrency: 2
     rate_limit_qps: 5.0
@@ -45,8 +45,8 @@ sources:
     kind: bilibili
     weight: 0.8
     # 请求账：3 个模板 × 1 页搜索 + 1 次专栏搜索 + 最多 10 个视频 ×（简介 + 评论）≈ 25 次
-    # 以 4 qps 计约 6 秒；冷启动时 nav 取 key 再加 1 次。15 秒留足余量。
-    deadline: 15
+    # 实测 6.9s 跑完；放宽到 20s 是为了"评论翻页 + 视频多跟几个"时也跑得完。
+    deadline: 20
     concurrency: 5
     rate_limit_qps: 4.0
     search_pages: 1          # 每个模板抓几页（每页 20 条）
@@ -70,12 +70,16 @@ sources:
     enabled: true
     kind: bt
     weight: 0.6
-    # nyaa 单站就要 ~9.6s（实测），4 个站并发打时 12s 预算会被砍掉整源；
-    # deadline 15s + 每查询最多 4 站（nyaa / dmhy / mikan / sukebei 按垂直命中挑）。
-    deadline: 15
-    concurrency: 4
-    rate_limit_qps: 1.5
+    # nyaa 单站就要 ~9.6s（实测），放宽到 25s 让它跑完，不再整源被判超时。
+    deadline: 25
+    # 主查询 + 补搜会让这个源跑 2~3 遍；限速 1.5 qps 会把它们串成 30s+，
+    # 表现就是"整源超时、什么都没拿到"。放到 5 qps + 并发 8 让几遍并行跑。
+    concurrency: 8
+    rate_limit_qps: 5.0
     max_sites: 4
+    # 不重试：nyaa 的 504 重试会让单站从 12s 变成 24s，正好顶到整源预算上限，
+    # 于是"所有站都被一个站的偶发抖动拖住"。宁可少一次重试，也不要整源被砍。
+    retries: 0
     page_timeout: 10
     page_concurrency: 4
 
@@ -121,7 +125,7 @@ sources:
     # 目录 54 个站，但**每次查询只打 10 个**（垂直命中优先、再按探测 yield 排序）。
     # 上轮试过 16 个：实测频繁 12s 预算跑不完 → 整源超时、返回 0 条，
     # 反而不如少打几个把结果拿回来。
-    deadline: 15
+    deadline: 25            # 放宽到 25s：页站本身就是慢源，宁可等它跑完
     concurrency: 8          # 同时打几个站
     max_sites: 10           # 每个查询最多打几个站
     max_pages: 4            # 每个站最多跟进几个详情页（再多收益很小）
@@ -153,7 +157,7 @@ sources:
     #   模板 3 → 2（去掉产出最差的 'site:tieba...'，它已被前两条覆盖）
     #   deadline 12 → 15，并发 5 → 8
     # 让"每次都真的跑到结果"，而不是每次都刚好被截断。
-    deadline: 15
+    deadline: 25
     concurrency: 8
     rate_limit_qps: 3.0
     fetch_result_pages: true  # 阶段 2：抓内容页（召回主力，比阶段 1 值钱）
@@ -252,9 +256,11 @@ adult_sources:
   - "plugin:javdb"     # PanSou 的 JavDB 插件（成人影片数据库）
   - "bt:sukebei"       # sukebei.nyaa.si（nyaa 的成人分区）
 
-# 抓取阶段的整体截止时间（秒）：超过就跳过还没返回的数据源。
-# 实测 TG 本地索引 0.0s / PanSou 8~15s / Brave 15~22s —— 不等最慢的那个。
-fetch_deadline: 15
+# 抓取阶段的整体截止时间（秒）：没单独配 deadline 的源用它。
+# 2026-09-22 按用户要求放宽到 25s：宁可多等几秒，也要让每个源跑完，
+# 而不是在 12~15s 处整源被砍（表现为界面上一串"超时/降级"）。
+# 注意：只有**真的有源在慢慢跑**时才会等满；全部源提前返回时，搜索照样很快。
+fetch_deadline: 25
 
 # 查询级缓存：同一关键词 + 同一组参数在 N 秒内复用整份结果。
 # 主要买的是**一致性**（同一搜索不会因网络抖动给出不同答案）和一次全网抓取；

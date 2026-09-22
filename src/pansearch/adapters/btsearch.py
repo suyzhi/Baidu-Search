@@ -45,9 +45,9 @@ DEFAULT_SITES: list[dict] = [
     {
         "name": "nyaa",
         "search": "https://nyaa.si/?f=0&c=0_0&q={q}",
-        # 单站超时：nyaa 实测要 9.6s（偶发 504 还要再来一次），是整源的瓶颈。
-        # 给它单独收在 8s，慢的时候牺牲它自己，不给其它站和整次搜索拖后腿。
-        "timeout": 8,
+        # 单站超时：nyaa 实测要 9.6s（偶发 504 还要重试一次）。
+        # 12s 是"跑得完 + 不把整源预算吃光"的折中 —— 补搜那几遍会并发打它。
+        "timeout": 12,
         # audio-tool 也归进来：VST / 音源 / 采样包的 BT 发布大量在 nyaa
         "verticals": ["anime", "movie", "music", "game", "software", "audio-tool"],
     },
@@ -139,6 +139,9 @@ def row_titles(html: str) -> dict[str, str]:
 class BtSearchAdapter(Adapter):
     name = "btsearch"
     kind = "bt"
+    # 注意：**不要**设 primary_only —— 实测多词查询（如 "Ayira Oba"）里
+    # BT 站的结果恰恰来自补搜词那几遍（主查询太具体，nyaa/sukebei 一条不中）。
+    # 关掉补搜会把 1075 条打成 0 条。慢的问题改用"放开限速、并行跑"解决（见 config）。
 
     def __init__(self, cfg: dict | None = None):
         super().__init__(cfg)
