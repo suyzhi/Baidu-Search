@@ -83,7 +83,38 @@ pansearch verify "https://pan.quark.cn/s/xxx"   # 校验单条（支持 5 种网
 pansearch verify "https://115.com/s/xxx" -p 提取码
 pansearch sources                               # 列出启用的数据源
 pansearch stats                                 # 本地缓存统计
+
+# 定时维护：加深索引 + 复验过期链接（见下节）
+pansearch maintain --json .cache/maintain-report.json
+pansearch maintain --force --no-index --verify-limit 400   # 只做复验
 ```
+
+### 让它自己"越用越全"：定时维护
+
+召回的两个长期资产都是"不做就悄悄退化"的：TG 索引不加深就停在最后一次手动维护的位置；
+验活缓存过期后**要等下一次搜索**才会重验 —— 冷门关键词可能几个月没人搜，链接就几个月没人复核。
+
+```bash
+./scripts/install-schedule.sh          # 装成 launchd 定时任务（每 6 小时一轮，可先 print 预览）
+./scripts/install-schedule.sh status   # 看是否在跑 + 最近一次报告
+./scripts/install-schedule.sh print    # 只打印 plist 不安装（plutil -lint 可直接校验）
+./scripts/install-schedule.sh uninstall
+```
+
+一轮维护实测（2026-09-21，50 秒）：
+
+| 步骤 | 结果 |
+|---|---|
+| 加深 TG 索引 | 398 频道 × 3 页 → **新增 8269 条消息**（37.8s）|
+| 复验过期链接 | 候选 400 → **存活 366 / 失效 11**（23.8s）|
+| 缓存状态 | 过期条目 9348 → 8971（每轮把最久没验的 400 条推平）|
+
+设计上的几个关键点（都在 `src/pansearch/maintain.py` 里）：
+- **运行锁**：两个定时任务重叠时后到的直接跳过；锁超过 3 小时视为陈旧可接管 ——
+  否则一次 `kill -9` 就能让定时任务永久停摆。
+- **最小间隔**：距上次维护不足 N 小时直接跳过（launchd 用 `StartInterval` + `--min-interval` 双保险）。
+- **死链不重复浪费预算**：刚判死的链接跳过，超过 30 天才再验一次（覆盖"重新上传"的小概率）。
+- **队列按"最久没验"排序**，而不是随机：积压越多越能保证每条都被轮到。
 
 ### 剔除失效链接
 

@@ -110,6 +110,48 @@ class VerifyCache:
         row = self.conn.execute("SELECT COUNT(*) FROM verify_cache").fetchone()
         return {"cached_links": row[0] if row else 0, "db": str(self.path)}
 
+    # ------------------------------------------------------------------ 定时复验
+    def stale(self, older_than_hours: float, limit: int = 200) -> list[dict]:
+        """列出已经/即将过期的缓存条目，供定时复验使用。
+
+        为什么要它：验活缓存有 TTL（默认 6 小时），过期后**下一次搜索才会去重验**——
+        也就是说一个关键词可能半年没人搜过，它下面的链接就半年没被复核过。
+        定时任务按"最久没验的先验"把队列推平，而不是靠用户偶然搜到。
+
+        返回 [{key, pwd, status, checked_at, age_hours}]；key 是资源键
+        （baidu:1AbC / quark:pan.quark.cn/s/xxx），复验时用它重建 Resource。
+        """
+        cutoff = time.time() - older_than_hours * 3600
+        rows = self.conn.execute(
+            "SELECT surl, status, checked_at FROM verify_cache"
+            " WHERE checked_at <= ? ORDER BY checked_at ASC LIMIT ?",
+            (cutoff, int(limit)),
+        ).fetchall()
+        out: list[dict] = []
+        for surl, status, checked_at in rows:
+            key, _, pwd = str(surl).partition("|")
+            key, _, _ = key.partition("|") if key.startswith(f"v{CACHE_VERSION}") else (surl, "", "")
+            # 缓存键格式：v{CACHE_VERSION}|<resource_key>|<pwd>
+            parts = str(surl).split("|")
+            if len(parts) < 2:
+                continue
+            out.append({
+                "key": parts[1],
+                "pwd": parts[2] if len(parts) > 2 and parts[2] else None,
+                "status": status,
+                "checked_at": checked_at,
+                "age_hours": round((time.time() - checked_at) / 3600, 1),
+            })
+        return out
+
+    def pending_count(self, older_than_hours: float) -> int:
+        cutoff = time.time() - older_than_hours * 3600
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM verify_cache WHERE checked_at <= ?", (cutoff,)
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+
     def log_search(self, kw: str, hits: int, alive: int) -> None:
         self.conn.execute(
             "INSERT INTO search_log (kw, ts, hits, alive) VALUES (?, ?, ?, ?)",

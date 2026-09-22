@@ -6,6 +6,7 @@ import asyncio
 import csv
 import json
 from pathlib import Path
+from dataclasses import asdict
 from typing import Optional
 
 import typer
@@ -303,6 +304,79 @@ def stats() -> None:
             table.add_row(kw, str(cnt))
         console.print(table)
     cache.close()
+
+
+@app.command()
+def maintain(
+    index_pages: int = typer.Option(3, "--index-pages",
+                                    help="每频道向历史深挖几页（0 = 不加深索引）"),
+    verify_limit: int = typer.Option(400, "--verify-limit",
+                                     help="本轮最多复验多少条过期缓存（0 = 不复验）；"
+                                          "实测 400 条约 33 秒，仍在预算内"),
+    min_interval_hours: float = typer.Option(6.0, "--min-interval",
+                                             help="距上次维护不足这么久则跳过"),
+    budget: float = typer.Option(240.0, "--budget", help="本轮墙钟预算（秒）"),
+    force: bool = typer.Option(False, "--force", help="忽略最小间隔与运行锁"),
+    no_index: bool = typer.Option(False, "--no-index", help="只复验，不加深索引"),
+    no_verify: bool = typer.Option(False, "--no-verify", help="只加深索引，不复验"),
+    json_out: Optional[Path] = typer.Option(None, "--json", help="把维护报告写成 JSON"),
+) -> None:
+    """定时维护：加深 TG 索引 + 复验过期链接（给 launchd / cron 用）。
+
+    两件事都是"不做就悄悄退化"的：
+      · 索引不加深，召回就停在最后一次手动维护的位置；
+      · 缓存里的链接过期后要等下一次搜索才会重验，冷门关键词可能几个月没人搜。
+    装成定时任务：./scripts/install-schedule.sh
+    """
+    from .maintain import run_maintenance
+
+    with console.status("[cyan]维护中（加深 TG 索引 + 复验过期链接）…[/cyan]"):
+        report = asyncio.run(
+            run_maintenance(
+                index_pages=index_pages, verify_limit=verify_limit, budget=budget,
+                min_interval_hours=min_interval_hours, force=force,
+                skip_index=no_index, skip_verify=no_verify,
+            )
+        )
+
+    if report.skipped:
+        console.print(f"[yellow]跳过本轮维护：{report.skipped}[/yellow]"
+                      f"  [dim]（--force 可强制执行）[/dim]")
+    else:
+        idx = report.index or {}
+        if idx:
+            console.print(
+                f"[green]索引[/green]：频道 {idx.get('channels', '-')} 个 ｜ "
+                f"页面 {idx.get('pages', '-')} ｜ 新增消息 [bold]{idx.get('new', 0)}[/bold] 条 ｜ "
+                f"耗时 {idx.get('seconds', 0):.1f}s"
+            )
+        ver = report.verify or {}
+        if ver:
+            console.print(
+                f"[green]复验[/green]：候选 {ver.get('candidates', 0)} ｜ "
+                f"存活 [green]{ver.get('alive', 0)}[/green] ｜ "
+                f"失效 [red]{ver.get('dead', 0)}[/red] ｜ "
+                f"不支持 {ver.get('unsupported', 0)} ｜ "
+                f"耗时 {ver.get('seconds', 0):.1f}s"
+            )
+        console.print(
+            f"[dim]缓存 {report.cache.get('cached_links', '?')} 条 ｜ "
+            f"本轮开始时过期 {report.cache.get('expired_before', '?')} 条 ｜ "
+            f"结束剩余 {(report.verify or {}).get('expired_after', '?')} 条 ｜ "
+            f"总耗时 {report.elapsed:.1f}s[/dim]"
+        )
+    for err in report.errors:
+        console.print(f"[red]⚠ {err}[/red]")
+
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(
+            json.dumps(asdict(report), ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        console.print(f"[dim]报告已写入 {json_out}[/dim]")
+
+    if report.skipped:
+        raise typer.Exit(0)
 
 
 index_app = typer.Typer(help="Telegram 频道索引：越挖越全，之后检索毫秒级")
