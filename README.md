@@ -435,9 +435,15 @@ Discuz、DedeCMS、帝国 CMS…），并**自动推导详情页正则**，直�
 >
 > **真正能翻 10 倍的是"索引深度"**（见 `scripts/deepen-index.sh`）：
 > `index crawl --deepen` 每轮把每个频道的抓取位置往历史推 N 页，反复跑就是线性加深。
-> 实测 30 页/频道 ≈ +10 万条消息；索引已从 63.3 万 → **73.0 万条**（含链接 26.8 万 → 29.2 万）。
-> 到 600 万条（10 倍）约需 25~30 轮，可挂夜里跑：
-> `ROUNDS=25 PAGES=100 nohup ./scripts/deepen-index.sh > .cache/deepen.log 2>&1 &`
+> 实测 60 页/频道 ≈ **+14 万条/轮**、单轮约 5~6 分钟；索引已从 63.3 万 → **102 万条**
+> （含链接 26.8 万 → 38.6 万，同比 +61% / +44%）。到这个速率，600 万条（10 倍）约 12 小时。
+>
+> 常驻方式（推荐，nohup 会随会话结束被回收）：
+> ```bash
+> ./scripts/install-deepen.sh              # 装成 launchd：每 1 小时一轮 × 3 次 × 100 页
+> ./scripts/install-deepen.sh status       # 看是否在跑 + 最近进度 + 当前索引量
+> ./scripts/install-deepen.sh uninstall    # 卸载（索引数据保留）
+> ```
 
 #### 成人内容源：默认开启，可一键过滤
 
