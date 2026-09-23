@@ -25,6 +25,34 @@ apis:
   # ---- 需要适配器新能力的（POST / 顶层数组）----
   # 实测没收的两个 HTML 搜索页：standardebooks / gutenberg 的搜索结果**是 JS 渲染**，
   # 首屏 HTML 里只有导航锚点、没有 /ebooks/<id> 链接 —— 抽不到就不是数据源。
+  # ---- 第三批实测（2026-09-22，关键词 "matrix"）----
+  # 实测可用：DOAB（DSpace REST，需把 handle 拼成 URL）、OAPEN（同）
+  # 实测**不收**：EZTV（只有"最新种子"接口，没有关键词检索）/
+  #   openml(412) / bhl(401 需 key) / anilist(404) / chesscom(404) /
+  #   annas-archive·libgen·z-lib·nekobt(连不上) / deezer·itunes·tvmaze·wikidata·
+  #   huggingface-datasets（都是元数据，没有可下载链接）
+  - name: doab
+    vertical: ebook,academic
+    enabled: true
+    weight: 0.6
+    url: "https://directory.doabooks.org/rest/search?query={q}&expand=metadata&limit=20"
+    format: json
+    items: "$"
+    title: name
+    # DSpace REST 的 handle 是裸编号（如 20.500.12854/136739），必须拼成 URL，
+    # 否则 build_link 会因为"不是 http 开头"整条丢掉（实测 0 条就是这么来的）。
+    link_template: "https://directory.doabooks.org/handle/{handle}"
+
+  - name: oapen
+    vertical: ebook,academic
+    enabled: true
+    weight: 0.6
+    url: "https://library.oapen.org/rest/search?query={q}&expand=metadata&limit=20"
+    format: json
+    items: "$"
+    title: name
+    link_template: "https://library.oapen.org/handle/{handle}"
+
   - name: figshare
     vertical: academic
     enabled: true

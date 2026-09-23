@@ -428,3 +428,94 @@ SharedResources
 TVbox888
 fufeikc
 peekfun
+
+# ---- 由 pansearch channels harvest 自动采收（已做价值校验）----
+# 垂直领域: academic（5 个）
+MeowMiniMeow
+cndevdaily
+pikapush
+thr0wz
+tombkeepertk
+# 垂直领域: design（3 个）
+LinksDownload
+clsvip
+simpread
+# 垂直领域: ebook（1 个）
+meiriyishu
+# 垂直领域: game（1 个）
+clbfxs
+# 垂直领域: general（1 个）
+zongheyings
+# 垂直领域: movie（9 个）
+MJJ_aliyundrive
+XQFXS
+aliyunys
+beyondHD
+ciliku
+movielover8888_film
+quanziyuanshe
+solidsexydoll
+x123panfxme
+# 垂直领域: music（4 个）
+demo2099
+hyi0618
+pj_cn
+xyuanfxs
+# 垂直领域: software（11 个）
+ALING521
+GetSomeFriesChannel
+IBH_0
+NewPiN1Channel
+ShareCentre
+freejidi
+sharpduan001
+shumoindex
+solidot
+tvpans
+wbnet
+
+# ---- 由 pansearch channels harvest 自动采收（已做价值校验）----
+# 垂直领域: ebook（1 个）
+LDAPK
+# 垂直领域: game（1 个）
+wikidb
+# 垂直领域: general（1 个）
+HbHelper
+
+# ---- 由 pansearch channels harvest 自动采收（已做价值校验）----
+# 垂直领域: academic（1 个）
+DNSPODT
+# 垂直领域: ebook（1 个）
+inside1024
+# 垂直领域: game（1 个）
+dsuse
+# 垂直领域: software（2 个）
+PanAnnouncement
+kmfccc
+
+# ---- 由 pansearch channels harvest 自动采收（已做价值校验）----
+# 垂直领域: ebook（1 个）
+RiNGNiR
+# 垂直领域: movie（1 个）
+shieldtvpro2019
+# 垂直领域: software（5 个）
+FuckCJMarketing
+ZaiHuaPd
+elecV2
+useless_project_ideas
+zaihuapd
+
+# ---- 由 pansearch channels harvest 自动采收（已做价值校验）----
+# 垂直领域: academic（1 个）
+deepseek_ai
+# 垂直领域: design（1 个）
+sharetypecho
+# 垂直领域: ebook（1 个）
+xqradio
+# 垂直领域: software（6 个）
+TestFlightCN
+chunse1024
+howie_weekly
+liyuans
+milkice_portal
+zaihuanews

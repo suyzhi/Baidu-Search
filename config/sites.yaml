@@ -147,6 +147,14 @@ sites:
   result_re: https://jpsmile\.com/[a-z0-9_-]+/
   verified: true
   note: probe https://jpsmile.com/?s={q} yield=4
+- name: liuyandong
+  domain: liuyandong.com
+  verticals:
+  - general
+  search: https://liuyandong.com/?s={q}
+  result_re: https://liuyandong\.com/+/\d+
+  verified: true
+  note: probe https://liuyandong.com/?s={q} yield=3
 - name: itmop
   domain: m.itmop.com
   verticals:
@@ -155,6 +163,22 @@ sites:
   result_re: https://m\.itmop\.com/[a-z0-9_-]+/\d+\.html
   verified: true
   note: probe https://m.itmop.com/search/?q={q} yield=1
+- name: news
+  domain: news.readmoo.com
+  verticals:
+  - general
+  search: https://news.readmoo.com/?s={q}
+  result_re: https://news\.readmoo\.com/\d+/\d+/\d+/[a-z0
+  verified: true
+  note: probe https://news.readmoo.com/?s={q} yield=5
+- name: salttiger
+  domain: salttiger.com
+  verticals:
+  - general
+  search: https://salttiger.com/?s={q}
+  result_re: https://salttiger\.com/+/\d+
+  verified: true
+  note: probe https://salttiger.com/?s={q} yield=10
 - name: segmentfault
   domain: segmentfault.com
   verticals:
@@ -171,6 +195,14 @@ sites:
   result_re: https://slsup\.com/[a-z0-9_-]+\.html
   verified: true
   note: probe https://slsup.com/search.php?q={q} yield=16
+- name: tmioe
+  domain: tmioe.com
+  verticals:
+  - general
+  search: https://tmioe.com/?s={q}
+  result_re: https://tmioe\.com/\d+\.html
+  verified: true
+  note: probe https://tmioe.com/?s={q} yield=6
 - name: toolsdar
   domain: toolsdar.cn
   verticals:
@@ -235,6 +267,14 @@ sites:
   result_re: https://www\.ghxi\.com/[a-z0-9_-]+\.html
   verified: true
   note: probe https://www.ghxi.com/?s={q} yield=8
+- name: www
+  domain: www.gutenberg.org
+  verticals:
+  - general
+  search: https://www.gutenberg.org/ebooks/search/?query={q}
+  result_re: https://www\.gutenberg\.org/+/[a-z
+  verified: true
+  note: probe https://www.gutenberg.org/ebooks/search/?query={q} yield=10
 - name: mairuan
   domain: www.mairuan.com
   verticals:
@@ -275,6 +315,14 @@ sites:
   result_re: https://www\.ns211\.com/\d+\.html
   verified: true
   note: probe https://www.ns211.com/?s={q} yield=2
+- name: www
+  domain: www.pdfzj.com
+  verticals:
+  - general
+  search: https://pdfzj.com?s={q}
+  result_re: https://www\.pdfzj\.com/\d+\.html
+  verified: true
+  note: probe https://pdfzj.com?s={q} yield=1
 - name: s21
   domain: www.s21.cn
   verticals:
@@ -339,6 +387,14 @@ sites:
   result_re: https://x1g\.la/[a-z0-9_-]+\.html
   verified: true
   note: probe https://x1g.la/?s={q} yield=5
+- name: yingheapk
+  domain: yingheapk.com
+  verticals:
+  - general
+  search: https://yingheapk.com/?s={q}
+  result_re: https://yingheapk\.com/\d+\-+/
+  verified: true
+  note: probe https://yingheapk.com/?s={q} yield=8
 - name: 4mf
   domain: www.4mf.net
   verticals:

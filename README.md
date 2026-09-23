@@ -416,15 +416,22 @@ Discuz、DedeCMS、帝国 CMS…），并**自动推导详情页正则**，直�
 | 适配器 | 可检索后端 | 数量 | 怎么来的（每一条都有实测依据） |
 |---|---|---|---|
 | `pansou` | 网盘聚合插件 | **108** | 官方 latest 镜像只带 74 个；`scripts/build-pansou.sh` 从源码重建并补齐上游 `main.go` **从没接线过的 34 个插件**（含 `javdb`） |
-| `sitesearch` | 垂直资源站 | **54** | 先用本地 SearXNG / 直连引擎 / PanSou 结果反查候选域名，再用"详情页真有分享链接"的判据探测：346 个候选通过 28 个、69 个已知站通过 3 个（45 个站实测 yield≥2，9 个 yield=1 保留但会被运行时健康度淘汰） |
-| `apisources` | 公开 API | **18** | 学术/电子书/数据集/影视/动画：arxiv、crossref、openalex、europepmc、plos、doaj、osf、zenodo、datacite、figshare、archive.org、openlibrary、gutendex、wikisource、kitsu、tvmaze、yts、mangadex。为此给 API 层加了 **POST body、顶层数组、HTML link_re、per-API headers** 四种能力 |
+| `sitesearch` | 垂直资源站 | **61** | 候选池共 3721 个（SearXNG/直连引擎反查 415 + 从 62 万条 TG 消息的链接里反查 2393 + 已知站清单 224），按"详情页真有分享链接"的判据探测，通过率 1.7~4.5%。**并行分片会让 probe-all 互相覆盖目录**（实测丢了 12 个），已改为从日志顺序合并 |
+| `apisources` | 公开 API | **20** | 学术/电子书/数据集/影视/动画：arxiv、crossref、openalex、europepmc、plos、doaj、osf、zenodo、datacite、figshare、archive.org、openlibrary、gutendex、wikisource、kitsu、tvmaze、yts、mangadex。为此给 API 层加了 **POST body、顶层数组、HTML link_re、per-API headers** 四种能力 |
 | `websearch` | 搜索引擎 | **8** | bing / baidu / ddg / sogou / so360 / naver / toutiao + **自建 SearXNG**（一个后端换十几个引擎，含直连被 429/403 的 google/brave/qwant） |
 | `btsearch` | BT / 磁力站 | **4** | nyaa（75 magnet）、dmhy（46）、mikan（41）、sukebei（75）；搜索页直出 magnet，标题取 `dn=` 或行内文本 |
 | `bilibili` | B 站三路 | **3** | WBI 签名 + 游客 cookie → 视频简介 / 评论区（含置顶与楼中楼）/ 专栏摘要 |
-| `telegram` | TG 频道 | **430** | 本地 SQLite 索引（628k 消息 / 271k 含链接） |
+| `telegram` | TG 频道 | **521** | 从 62 万条消息里反查 `t.me/xxx` 提及 → 2076 个候选频道 → 按"最近一页真有 ≥1 条分享链接"校验 → 收下 94 个（通过率 4.5%）。索引 633k 消息 / 268k 含链接 |
 
-**自己写的后端（不含 PanSou 插件与 TG 频道）：43 → 87 个（2.0 倍）**；
-含 PanSou 插件后总数 151 → 195。
+**自己写的后端（不含 PanSou 插件与 TG 频道）：87 → 96 个**；含 TG 频道合计 517 → 617 个。
+
+> ⚠️ 诚实说明：**"源数量再翻 10 倍"做不到且不该硬凑**。各池子的实际情况：
+> PanSou 插件 108/109 已是硬上限；可用搜索引擎实测只剩 8 个（其余 403/429/空页）；
+> 公开 API 有产出的基本找完（试了 50 个，收 20 个）；候选域名的**验证通过率只有 1.7~4.5%**，
+> 要拿 800 个新后端就需要 2 万个新候选域名 —— 而唯一能提供这种规模的 TG 频道目录站
+> （telegramchannels.me / telemetr.io / tgstat.ru）全部 403，需要无头浏览器才能抓。
+> **真正能翻 10 倍的是"索引深度"**：`index crawl --deepen` 每轮把每个频道的抓取位置
+> 往历史推 30 页，反复跑就能把索引从 63 万条推到数百万条（Tavily 的召回主要来自这一层）。
 
 #### 成人内容源：默认开启，可一键过滤
 
