@@ -429,9 +429,15 @@ Discuz、DedeCMS、帝国 CMS…），并**自动推导详情页正则**，直�
 > PanSou 插件 108/109 已是硬上限；可用搜索引擎实测只剩 8 个（其余 403/429/空页）；
 > 公开 API 有产出的基本找完（试了 50 个，收 20 个）；候选域名的**验证通过率只有 1.7~4.5%**，
 > 要拿 800 个新后端就需要 2 万个新候选域名 —— 而唯一能提供这种规模的 TG 频道目录站
-> （telegramchannels.me / telemetr.io / tgstat.ru）全部 403，需要无头浏览器才能抓。
-> **真正能翻 10 倍的是"索引深度"**：`index crawl --deepen` 每轮把每个频道的抓取位置
-> 往历史推 30 页，反复跑就能把索引从 63 万条推到数百万条（Tavily 的召回主要来自这一层）。
+> （telegramchannels.me / telemetr.io / tgstat.ru）**用无头浏览器也过不去**：
+> 实测 Playwright + 本机真实 Chrome（有头、持久化 profile）等 25 秒仍是 Cloudflare
+> 的 "请稍候…" 挑战页，连 `cf_clearance` cookie 都拿不到。
+>
+> **真正能翻 10 倍的是"索引深度"**（见 `scripts/deepen-index.sh`）：
+> `index crawl --deepen` 每轮把每个频道的抓取位置往历史推 N 页，反复跑就是线性加深。
+> 实测 30 页/频道 ≈ +10 万条消息；索引已从 63.3 万 → **73.0 万条**（含链接 26.8 万 → 29.2 万）。
+> 到 600 万条（10 倍）约需 25~30 轮，可挂夜里跑：
+> `ROUNDS=25 PAGES=100 nohup ./scripts/deepen-index.sh > .cache/deepen.log 2>&1 &`
 
 #### 成人内容源：默认开启，可一键过滤
 
