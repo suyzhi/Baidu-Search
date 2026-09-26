@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from copy import deepcopy
+from contextlib import AsyncExitStack
+from copy import copy, deepcopy
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
@@ -19,11 +20,12 @@ from .adapters import sitesearch as _sitesearch  # noqa: F401  触发注册
 from .adapters import telegram as _telegram  # noqa: F401  触发注册
 from .adapters import websearch as _websearch  # noqa: F401  触发注册
 from .adapters.base import partial_hits
-from .config import alias_config, sources_config, verify_cfg
+from .config import alias_config, cfg_float, cfg_int, sources_config, verify_cfg
 from .dedupe import build_resources
 from .models import PanType, RawHit, Resource
 from .query import MODIFIERS, normalize_text, split_query
 from .score import confidently_irrelevant, score_all, sort_resources
+from .store import VerifyCache
 from .verifiers import VerifierPool, prune
 
 UA = (
@@ -230,10 +232,13 @@ async def _fetch_hits(
     一刀切的截止时间会误伤：定 15s 时 PanSou 常被砍掉，而定 30s 又要为低产出的
     Brave 白等。所以按各源自己的 `deadline` 配置（缺省用全局 fetch_deadline）。
     """
-    default = float(deadline or sources_config().get("fetch_deadline") or 15.0)
+    # 调用方显式给了 deadline 就用它；否则读全局 fetch_deadline（0 也是合法值，
+    # 所以不能再写 "or 15.0"）
+    default = (float(deadline) if deadline is not None
+               else cfg_float(sources_config(), "fetch_deadline", 15.0))
 
     async def one(adapter) -> tuple[list[RawHit], str | None, float]:
-        limit = float(adapter.cfg.get("deadline") or default)
+        limit = cfg_float(adapter.cfg, "deadline", default)
         collected: list[RawHit] = []
         token = partial_hits.set(collected)
         got: list[RawHit] | None = None
@@ -307,6 +312,43 @@ def is_nsfw(resource: Resource) -> bool:
     return False
 
 
+# ---- 流式预览节流 ----
+# "先显示，再补全"原本是：**任意一个**"数据源 × 查询"任务一返回就重跑一遍
+# build_resources（去重）+ score_all（打分）再推一帧。一次搜索可能派发 20 个任务，
+# 而 TG 本地索引 0.02s 就能返回几百条 —— 结果密集到达时等于在**同一次搜索里**把
+# 去重+打分完整重跑 20 次，且一次比一次数据量大。CPU 花在重复劳动上，结果量上千时
+# 反而让"先显示"的这几帧变卡（这些计算在 to_thread 里，不阻塞抓取，但抢 CPU）。
+#
+# 两个放行条件互相独立：间隔保证"慢慢到货"时界面也在动，新增条数保证大结果集
+# 不会长时间停在旧的一屏。首帧永远放行。
+PREVIEW_MIN_INTERVAL_SECONDS = 0.4
+PREVIEW_MIN_NEW_HITS = 25
+
+
+class PreviewThrottle:
+    """判断这一批新命中值不值得重算并推送一帧预览。"""
+
+    def __init__(self, min_interval: float = PREVIEW_MIN_INTERVAL_SECONDS,
+                 min_new_hits: int = PREVIEW_MIN_NEW_HITS):
+        self.min_interval = max(0.0, float(min_interval))
+        self.min_new_hits = max(1, int(min_new_hits))
+        self.last_at: float | None = None
+        self.last_hits = 0
+        self.emitted = 0
+        self.skipped = 0
+
+    def should_emit(self, now: float, hits: int) -> bool:
+        if self.last_at is None:          # 首帧：界面尽快有东西看
+            return True
+        if hits - self.last_hits >= self.min_new_hits:
+            return True
+        return (now - self.last_at) >= self.min_interval
+
+    def mark(self, now: float, hits: int) -> None:
+        self.last_at, self.last_hits = now, hits
+        self.emitted += 1
+
+
 def _prepare(outcome: SearchOutcome, hits: list[RawHit], equivalents: list[str],
              types: list[PanType] | None, alive_only: bool, sfw: bool = False) -> None:
     outcome.raw_hits = len(hits)
@@ -327,6 +369,28 @@ def _prepare(outcome: SearchOutcome, hits: list[RawHit], equivalents: list[str],
         outcome.irrelevant_pruned = len(resources) - len(kept)
         resources = kept
     outcome.resources = resources
+
+
+# 边抓边验只送"匹配程度最高一档"的结果：此时还不知道全局排名，
+# 低相关的留给收尾阶段按全局相关性分配预算。
+EARLY_VERIFY_MIN_RELEVANCE = 0.85
+
+
+def _early_candidates(hits: list[RawHit], kw: str, equivalents: list[str],
+                      types: list[PanType] | None, sfw: bool) -> list[Resource]:
+    """一批新到的命中里值得立即验活的资源，按相关性从高到低。"""
+    resources = build_resources(hits)
+    if sfw:
+        resources = [r for r in resources if not is_nsfw(r)]
+    if types:
+        allowed = set(types)
+        resources = [r for r in resources if r.pan_type in allowed]
+    for res in resources:
+        res.queries = list(dict.fromkeys([*res.queries, *equivalents]))
+    score_all(resources, kw)
+    picked = [r for r in resources if r.relevance >= EARLY_VERIFY_MIN_RELEVANCE]
+    picked.sort(key=lambda r: (-r.relevance, -r.score))
+    return picked
 
 
 def _finish(outcome: SearchOutcome, alive_only: bool, strict: bool) -> None:
@@ -351,6 +415,7 @@ async def search(
     verify_budget: int | None = None,
     limit: int | None = None,
     on_progress: Callable[[SearchOutcome], Awaitable[None]] | None = None,
+    cache: VerifyCache | None = None,
 ) -> SearchOutcome:
     started = time.monotonic()
     kw = kw.strip()
@@ -371,7 +436,7 @@ async def search(
         return outcome
 
     # ---- 查询级缓存：命中即返回整份结果（含验活状态），保证重复搜索一致 ----
-    cache_ttl = float(sources_config().get("search_cache_ttl_seconds") or 0)
+    cache_ttl = cfg_float(sources_config(), "search_cache_ttl_seconds", 0.0)
     cache_key = None
     if cache_ttl > 0 and not limit:
         cache_key = _query_cache_key(kw, types, source_names, do_verify, alive_only,
@@ -383,15 +448,28 @@ async def search(
             cached.timings = {"total": time.monotonic() - started}
             return cached
 
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(30.0, connect=10.0),
-        follow_redirects=True,
-        http2=True,
-        headers={"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"},
-    ) as client:
-        import time as _time
+    # budget: 0 是文档化的"不限制（全量验活）"，不能被 or 吃掉
+    budget = max(0, int(verify_budget if verify_budget is not None
+                        else cfg_int(verify_cfg(), "budget", 300)))
+    # 边抓边验只花一部分预算：先到的源（TG 本地索引）不能把预算吃光，
+    # 慢源里更相关的结果还要验。
+    share = cfg_float(verify_cfg(), "early_verify_share", 0.75)
+    early_limit = int(budget * share) if budget > 0 else 0
+    early_enabled = do_verify and share > 0 and (budget == 0 or early_limit > 0)
 
-        _t_start = _time.monotonic()
+    async with AsyncExitStack() as stack:
+        client = await stack.enter_async_context(httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            follow_redirects=True,
+            http2=True,
+            headers={"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"},
+        ))
+        pool = (await stack.enter_async_context(VerifierPool(cache=cache))
+                if do_verify else None)
+        prefetch = getattr(pool, "prefetch", None) if early_enabled else None
+        peek = getattr(pool, "peek", None)
+
+        _t_start = time.monotonic()
         # 主查询 / 补搜 / 别名替换 一起并行发出：
         #   补搜（relaxed=True）要降权 —— 它是放宽，召回多但精准度低
         #   别名（relaxed=False）不降权 —— 它是等价替换，命中结果按替换后的词打分
@@ -404,6 +482,11 @@ async def search(
         jobs = []
         hits: list[RawHit] = []
         completed = {}
+        throttle = PreviewThrottle(
+            cfg_float(sources_config(), "preview_min_interval_seconds",
+                      PREVIEW_MIN_INTERVAL_SECONDS),
+            cfg_int(sources_config(), "preview_min_new_hits", PREVIEW_MIN_NEW_HITS),
+        )
 
         async def fetch_job(number, adapter, query, relaxed):
             batch = await _fetch_hits([adapter], client, query)
@@ -428,15 +511,37 @@ async def search(
                 if sfw:
                     hits, outcome.adult_pruned = filter_adult_hits(hits)
                 outcome.queries_used = list(dict.fromkeys([query_kw, *[h.query for h in hits if h.query]]))
+                if prefetch and got:
+                    batch = completed[number]
+                    if sfw:
+                        batch, _ = filter_adult_hits(batch)
+                    candidates = await asyncio.to_thread(
+                        _early_candidates, batch, kw, equivalents, types, sfw)
+                    prefetch(candidates, limit=early_limit)
                 if on_progress and got:
-                    # 每个来源只检索一次；CPU 工作移出事件循环，慢源继续并发运行。
-                    preview = deepcopy(outcome)
-                    await asyncio.to_thread(_prepare, preview, hits, equivalents, types, alive_only)
-                    preview.resources = sort_resources(preview.resources)
-                    if strict and alive_only:
-                        preview.resources, _ = prune(preview.resources, strict=True)
-                    preview.timings = {"elapsed": time.monotonic() - started}
-                    await on_progress(preview)
+                    now = time.monotonic()
+                    if not throttle.should_emit(now, len(hits)):
+                        # 节流掉的那几帧不是"丢结果"：完整结果由收尾的
+                        # _prepare + on_progress("complete") 给出。
+                        throttle.skipped += 1
+                    else:
+                        throttle.mark(now, len(hits))
+                        # 浅拷贝就够：resources 紧接着被 _prepare 整个替换，没必要把上一帧
+                        # 那几百条 Resource 深拷一遍（那是每次预览的固定大开销）。
+                        preview = copy(outcome)
+                        # CPU 工作移出事件循环，慢源继续并发运行。
+                        await asyncio.to_thread(_prepare, preview, hits, equivalents,
+                                                types, alive_only, sfw)
+                        if peek:
+                            # 已经验完的直接带上状态：预览里就能看到"有效"，死链不再露面
+                            for res in preview.resources:
+                                if res.verify is None and (known := peek(res)) is not None:
+                                    res.verify = known
+                        preview.resources = sort_resources(preview.resources)
+                        if alive_only:
+                            preview.resources, _ = prune(preview.resources, strict=strict)
+                        preview.timings = {"elapsed": time.monotonic() - started}
+                        await on_progress(preview)
         finally:
             for job in jobs:
                 if not job.done():
@@ -444,23 +549,23 @@ async def search(
             await asyncio.gather(*jobs, return_exceptions=True)
         outcome.timings["fetch"] = time.monotonic() - _t_start
         prep_start = time.monotonic()
-        await asyncio.to_thread(_prepare, outcome, hits, equivalents, types, alive_only)
+        # sfw 也要传：命中级过滤（adult_sources）在上面的循环里做了，这里还有一层
+        # 资源级兜底（nsfw_sources，按去重后的 sources/kinds 判）。两处必须一致，
+        # 否则最后一帧预览和最终结果会不一样。
+        await asyncio.to_thread(_prepare, outcome, hits, equivalents, types, alive_only, sfw)
         outcome.timings["prepare"] = time.monotonic() - prep_start
         resources = outcome.resources
         verify_start = time.monotonic()
 
-        if do_verify and resources:
+        if pool is not None and resources:
             # ---- 验活预算：先按相关性排序，只验活最相关的前 N 条 ----
             # 大结果集（700+）全量验活要 1~2 分钟，而用户只看前几十条。
-            budget = verify_budget if verify_budget is not None else verify_cfg().get("budget", 300)
-            budget = int(budget or 0)
+            # 边抓边验已发起的部分计入同一预算，这里只补验剩余名额并等它们收尾。
             resources.sort(key=lambda r: (-r.relevance, -r.score))
-
-            async with VerifierPool() as pool:
-                await pool.verify_all(resources, budget=budget)
-                outcome.verify_stats = dict(pool.stats)
-                outcome.verify_budget_skipped = pool.stats.get("budget_skipped", 0)
-                outcome.verify_timeout_skipped = pool.stats.get("timeout_skipped", 0)
+            await pool.verify_all(resources, budget=budget)
+            outcome.verify_stats = dict(pool.stats)
+            outcome.verify_budget_skipped = pool.stats.get("budget_skipped", 0)
+            outcome.verify_timeout_skipped = pool.stats.get("timeout_skipped", 0)
         outcome.timings["verify"] = time.monotonic() - verify_start if do_verify and resources else 0.0
 
     final_start = time.monotonic()

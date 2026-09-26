@@ -65,13 +65,15 @@ def ngram_encode(text: str) -> str:
 
 
 def match_phrase(term: str) -> str | None:
-    """把查询词编码成 FTS5 短语匹配表达式；含单字素时返回 None（bigram 覆盖不了）。
+    """把查询词编码成 FTS5 短语匹配表达式；含单个汉字时返回 None（bigram 覆盖不了）。
 
     同一个 CJK 片段展开出的 bigram 在文档里是**位置相邻**的，所以用短语
     `"沙丘 丘预 预言"` 能精确锁住「沙丘预言」这个子串。
+    单个拉丁字母/数字是整词入索引的（「C#」→ `c`），可以直接匹配；
+    原来一律拒绝，导致「C# 教程」回退全表 LIKE，473 万条索引上要 48 秒。
     """
     toks = ngram_tokens(term)
-    if not toks or any(len(t) < 2 for t in toks):
+    if not toks or any(len(t) < 2 and not t.isascii() for t in toks):
         return None
     return '"' + " ".join(toks) + '"'
 

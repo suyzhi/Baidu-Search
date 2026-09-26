@@ -200,7 +200,11 @@ verify:
   enabled: true
   concurrency: 16         # 跨网盘并发；每个网盘另有自己的限速
   rate_limit_qps: 5.0     # 百度专用（对 pan.baidu.com 温柔一点）
+  # 验活缓存的连接固定开 WAL + busy_timeout=5s（store.VerifyCache._configure）：
+  # Web 并发搜索、或 Web 与定时复验同时写同一张表时排队等待，而不是 database is locked。
   cache_ttl_hours: 6
+  dead_cache_ttl_hours: 720   # 已失效/不存在的链接缓存 30 天（死链几乎不会复活）
+  early_verify_share: 0.75    # 边抓边验最多先用掉多少比例的验活预算（其余留给慢源的结果）
   timeout: 15
   retries: 1
   # 验活预算：先恢复全部缓存，只对最相关的 N 条未缓存资源发起联网校验。
@@ -266,3 +270,11 @@ fetch_deadline: 25
 # 主要买的是**一致性**（同一搜索不会因网络抖动给出不同答案）和一次全网抓取；
 # 只缓存"有结果"或"没有源降级"的搜索，源故障导致的空结果仍可重试。0 = 关闭。
 search_cache_ttl_seconds: 300
+
+# 流式搜索的预览节流（pipeline.PreviewThrottle）：
+# 原来**任意一个**"数据源 × 查询"任务返回就重跑一遍全量去重 + 打分再推一帧，
+# 一次搜索可能派发 20 个任务 —— 等于在同一次搜索里把去重+打分完整重跑 20 次，
+# 且一次比一次数据量大（TG 本地索引 0.02s 就能返回几百条）。
+# 首帧永远立即推送；之后满足任一条件才重算：距上一帧够久 / 新增命中够多。
+preview_min_interval_seconds: 0.4
+preview_min_new_hits: 25

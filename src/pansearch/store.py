@@ -6,8 +6,13 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .config import CACHE_DIR, DEFAULT_DB
+from .config import CACHE_DIR, DEFAULT_DB, cfg_float, verify_cfg
+from .logutil import get_logger
 from .models import Status, VerifyResult
+
+logger = get_logger("store")
+
+_DEAD_STATUSES = (Status.DEAD.value, Status.NOT_FOUND.value)
 
 # 缓存语义版本：新增字段 / 改变判定逻辑时 +1，旧缓存自动失效
 CACHE_VERSION = 2
@@ -39,14 +44,51 @@ class VerifyCache:
     注意：状态依赖提取码（码对=alive / 码错=wrong_pwd），所以缓存键必须带上 pwd。
     """
 
-    def __init__(self, path: str | Path | None = None, ttl_hours: float = 6.0):
+    def __init__(self, path: str | Path | None = None, ttl_hours: float = 6.0, *,
+                 dead_ttl_hours: float | None = None, busy_timeout_ms: int = 5000):
         self.path = Path(path or DEFAULT_DB)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.ttl = ttl_hours * 3600
-        self.conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        # 死链单独一个长 TTL：失效的分享几乎不会复活，6 小时就重验等于把验活预算
+        # 反复花在已知结果上。ttl<=0（永不过期）时死链同样永不过期。
+        if dead_ttl_hours is None:
+            dead_ttl_hours = cfg_float(verify_cfg(), "dead_cache_ttl_hours", 720.0)
+        self.dead_ttl = 0.0 if self.ttl <= 0 else max(self.ttl, dead_ttl_hours * 3600)
+        self.busy_timeout_ms = max(0, int(busy_timeout_ms))
+        # connect(timeout=) 就是 sqlite3_busy_timeout 的入口；这里显式给值，而不是
+        # 吃 Python 默认的 5 秒靠运气。
+        self.conn = sqlite3.connect(
+            str(self.path), check_same_thread=False, timeout=self.busy_timeout_ms / 1000
+        )
+        self._configure()
         self.conn.executescript(_SCHEMA)
         self._migrate()
         self.conn.commit()
+
+    def _configure(self) -> None:
+        """并发相关 PRAGMA —— 必须在任何读写之前执行。
+
+        为什么必须有：VerifierPool 没收到外部 cache 时会自己建一个 VerifyCache，
+        而 Web 的每个搜索请求都会走到那里（各自一条连接），uvicorn 单进程也能并发
+        处理多个请求。默认 rollback-journal 模式下两个连接同时写 verify_cache，
+        后到的写会**立刻**抛 database is locked（用户侧表现为搜索接口报错），
+        多个进程（Web + 定时复验 + CLI）同时写也是同一个问题。
+
+        * journal_mode=WAL：读写互不阻塞
+        * busy_timeout：真的撞上写锁时排队等待重试，而不是直接失败
+        * synchronous=NORMAL：WAL 下的常规选择（省一次 fsync，崩溃安全性不降级到
+          "可能损坏"，最坏丢最近若干个事务）
+        """
+        try:
+            mode = self.conn.execute("PRAGMA journal_mode=WAL").fetchone()
+            logger.debug("验活缓存 journal_mode=%s path=%s",
+                         mode[0] if mode else "?", self.path)
+        except sqlite3.Error as exc:
+            # 网络盘 / 某些容器文件系统不支持 WAL。退化回默认模式也要能跑，但必须留痕：
+            # 那种环境下并发写冲突会重新变成 database is locked。
+            logger.warning("开启 WAL 失败，退回默认 journal 模式（path=%s）：%s", self.path, exc)
+        self.conn.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
+        self.conn.execute("PRAGMA synchronous=NORMAL")
 
     def _migrate(self) -> None:
         """旧库补列，避免升级后读不到 pwd_verified。"""
@@ -72,7 +114,8 @@ class VerifyCache:
         if not row:
             return None
         status, errno, method, note, checked_at, pwd_verified, title_hint = row
-        if self.ttl > 0 and time.time() - checked_at > self.ttl:
+        ttl = self.dead_ttl if status in _DEAD_STATUSES else self.ttl
+        if ttl > 0 and time.time() - checked_at > ttl:
             return None
         try:
             st = Status(status)
@@ -129,9 +172,8 @@ class VerifyCache:
         ).fetchall()
         out: list[dict] = []
         for surl, status, checked_at in rows:
-            key, _, pwd = str(surl).partition("|")
-            key, _, _ = key.partition("|") if key.startswith(f"v{CACHE_VERSION}") else (surl, "", "")
             # 缓存键格式：v{CACHE_VERSION}|<resource_key>|<pwd>
+            # （旧库可能残留不带版本前缀的键，拆不出两段就跳过这一条）
             parts = str(surl).split("|")
             if len(parts) < 2:
                 continue

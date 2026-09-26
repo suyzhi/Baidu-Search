@@ -21,7 +21,7 @@ from abc import ABC, abstractmethod
 
 import httpx
 
-from .config import pan_errno_config, verify_cfg
+from .config import cfg_bool, cfg_float, cfg_int, pan_errno_config, verify_cfg
 from .models import PanType, Resource, Status, VerifyResult
 from .normalize import safe_urlsplit
 from .store import VerifyCache
@@ -64,11 +64,12 @@ class ServiceVerifier(ABC):
 
     @property
     def enabled(self) -> bool:
-        return bool(self.cfg.get("enabled", True))
+        return cfg_bool(self.cfg, "enabled", True)
 
     @property
     def qps(self) -> float:
-        return float(self.cfg.get("qps") or self.default_qps)
+        # qps: 0 在 RateLimiter 里的语义是"不限速"，是合法配置
+        return cfg_float(self.cfg, "qps", self.default_qps)
 
     def supports(self, pan_type: PanType) -> bool:
         return pan_type in self.pan_types
@@ -271,12 +272,13 @@ class VerifierPool:
     def __init__(self, cfg: dict | None = None, cache: VerifyCache | None = None):
         vcfg = cfg or verify_cfg()
         self.cfg = vcfg
-        ttl = float(vcfg.get("cache_ttl_hours") or 6)
+        ttl = cfg_float(vcfg, "cache_ttl_hours", 6)
         self.cache = cache if cache is not None else VerifyCache(ttl_hours=ttl)
         self._owns_cache = cache is None
-        self.timeout = float(vcfg.get("timeout") or 20)
-        self.retries = max(0, int(vcfg.get("retries", 2)))
-        self.sem = asyncio.Semaphore(int(vcfg.get("concurrency") or 8))
+        self.timeout = cfg_float(vcfg, "timeout", 20)
+        self.retries = max(0, cfg_int(vcfg, "retries", 2))
+        # 并发数下限 1：Semaphore(0) 会让所有验活永久挂起
+        self.sem = asyncio.Semaphore(max(1, cfg_int(vcfg, "concurrency", 8)))
         self.baidu = BaiduVerifier(cfg=vcfg, cache=self.cache)
 
         services_cfg = (pan_errno_config().get("services") or {})
@@ -290,6 +292,8 @@ class VerifierPool:
                 self.verifiers.append(verifier)
         self.limiters = {v.name: RateLimiter(v.qps) for v in self.verifiers}
         self._client: httpx.AsyncClient | None = None
+        self._early: dict[tuple[str, str | None], asyncio.Task] = {}
+        self._early_used = 0
         self.stats: dict = {
             "checked": 0, "cache_hit": 0, "alive": 0, "dead": 0, "error": 0,
             "need_pwd": 0, "wrong_pwd": 0, "unsupported": 0, "pruned": 0,
@@ -308,6 +312,7 @@ class VerifierPool:
         return self
 
     async def __aexit__(self, *exc) -> None:
+        await self._cancel_early()
         await self.baidu.__aexit__(*exc)
         if self._client is not None:
             await self._client.aclose()
@@ -431,13 +436,69 @@ class VerifierPool:
         self._bump(service.name, result.status)
         return result
 
+    # ---- 边抓边验 ----
+    # 原来验活要等**所有**数据源抓完才开始：TG 本地结果 0.02 s 就到了，却要陪 PanSou
+    # 等满 30 s，再额外花 8 s 验活。prefetch 在结果到达时就把高相关的链接送去验活，
+    # 结果按 (资源键, 提取码) 记下；verify_all 收尾时直接取用，并计入同一个预算。
+    @staticmethod
+    def _early_key(res: Resource) -> tuple[str, str | None]:
+        return res.key, res.pwd
+
+    def prefetch(self, resources: list[Resource], *, limit: int = 0) -> int:
+        """为（已按相关性排好的）资源提前发起联网验活，返回新发起的数量。
+
+        limit>0 时整个搜索里提前验活的总数不超过 limit，剩余预算留给慢源的结果。
+        """
+        started = 0
+        for res in resources:
+            if limit > 0 and self._early_used >= limit:
+                break
+            key = self._early_key(res)
+            if key in self._early or not self.supports(res.pan_type):
+                continue
+            if self.cached_result(res) is not None:
+                continue
+            self._early_used += 1
+            # 在副本上验：各帧/收尾的 Resource 是重新构建的对象，结果按键回填
+            self._early[key] = asyncio.create_task(self.verify(res.model_copy(), use_cache=False))
+            started += 1
+        return started
+
+    def peek(self, res: Resource) -> VerifyResult | None:
+        """已完成的提前验活结果（没有或未完成返回 None），供流式预览使用。"""
+        task = self._early.get(self._early_key(res))
+        if task is None or not task.done() or task.cancelled() or task.exception():
+            return None
+        return task.result()
+
+    def _apply_early(self, res: Resource, result: VerifyResult) -> None:
+        # 统计已在副本验活时计过，这里只回填
+        res.verify = result
+        if result.title_hint and not res.title:
+            res.title = result.title_hint
+
+    async def _cancel_early(self) -> None:
+        for task in self._early.values():
+            if not task.done():
+                task.cancel()
+        if self._early:
+            await asyncio.gather(*self._early.values(), return_exceptions=True)
+
     # ---- 批量 ----
     async def verify_all(self, resources: list[Resource], *, budget: int = 0) -> None:
-        """预算只计未缓存的联网校验；先恢复全部缓存，再处理按相关性排好的候选。"""
+        """预算只计未缓存的联网校验；先恢复全部缓存，再处理按相关性排好的候选。
+
+        prefetch 已发起的验活计入预算；还没完成的和新发起的共用同一个 deadline。
+        """
         pending: list[Resource] = []
+        awaiting: list[tuple[Resource, asyncio.Task]] = []
         for res in resources:
             if not self.supports(res.pan_type):
                 await self.verify(res)  # API 直链与不支持验活的类型无需网络。
+                continue
+            early = self._early.get(self._early_key(res))
+            if early is not None:
+                awaiting.append((res, early))
                 continue
             cached = self.cached_result(res)
             if cached is not None:
@@ -446,26 +507,36 @@ class VerifierPool:
                 pending.append(res)
         self.stats["budget_skipped"] = 0
         self.stats["timeout_skipped"] = 0
+        self.stats["early"] = self._early_used
         if budget > 0:
-            skipped, pending = pending[budget:], pending[:budget]
+            room = max(0, budget - self._early_used)
+            skipped, pending = pending[room:], pending[:room]
             self.stats["budget_skipped"] = len(skipped)
             for res in skipped:
                 res.verify = VerifyResult(status=Status.UNCHECKED,
                     note=f"超出验活预算（最多新增 {budget} 次联网校验）")
         deadline = float(self.cfg.get("deadline", 8.0)) if budget > 0 else 0
-        jobs = asyncio.gather(*(self.verify(r, use_cache=False) for r in pending),
+        waiting = [task for _, task in awaiting if not task.done()]
+        jobs = asyncio.gather(*(self.verify(r, use_cache=False) for r in pending), *waiting,
                               return_exceptions=True)
+        timed_out = False
         try:
             if deadline > 0:
                 await asyncio.wait_for(jobs, timeout=deadline)
             else:
                 await jobs
         except asyncio.TimeoutError:
-            for res in pending:
-                if res.verify is None:
-                    self.stats["timeout_skipped"] += 1
-                    res.verify = VerifyResult(status=Status.UNCHECKED,
-                        note=f"验活等待超过 {deadline:g} 秒，保留结果供后续校验")
+            timed_out = True
+        for res, task in awaiting:
+            if task.done() and not task.cancelled() and not task.exception():
+                self._apply_early(res, task.result())
+        if timed_out:
+            for res in [*pending, *(r for r, _ in awaiting)]:
+                if res.verify is not None:
+                    continue
+                self.stats["timeout_skipped"] += 1
+                res.verify = VerifyResult(status=Status.UNCHECKED,
+                    note=f"验活等待超过 {deadline:g} 秒，保留结果供后续校验")
         for res in resources:
             if res.verify is None:
                 res.verify = VerifyResult(status=Status.UNKNOWN, method="error",

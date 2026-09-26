@@ -20,6 +20,7 @@ import json
 import re
 import sqlite3
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,7 +30,7 @@ from .config import CACHE_DIR, CONFIG_DIR
 from .extract import extract_from_text, html_to_text
 from .normalize import URL_RE, detect_pan_type, pwd_from_url
 from .query import matching_text, query_info, query_terms, subject_terms, term_present
-from .textindex import match_phrase, ngram_encode
+from .textindex import match_phrase, ngram_encode, ngram_tokens
 
 DEFAULT_DB = CACHE_DIR / "tg_index.sqlite3"
 DEFAULT_CHANNELS_FILE = CONFIG_DIR / "tg_channels.txt"
@@ -44,6 +45,46 @@ _TEXT_RE = re.compile(
     r'<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>\s*(?:<div|<span|</div>)', re.S
 )
 _TIME_RE = re.compile(r'<time[^>]*datetime="([^"]+)"')
+_PURE_CJK = re.compile(r"[㐀-鿿]+")
+
+# 候选数超过这个值就不做全量 bm25 排序：FTS5 的 ORDER BY rank 要给**每个**命中打分，
+# 实测 473 万条索引里「电影」（31 万命中）0.5 s、「4K」4.5 s；ORDER BY rowid 只要几毫秒。
+RANK_MAX_CANDIDATES = 20000
+# 需要逐条复核的层最多检查多少条候选（「C#」的候选是所有含字母 c 的消息）
+SCAN_CAP = 30000
+RECHECK_BUDGET_SECONDS = 1.5
+
+
+def _recheck(text: str, terms: list[str], need_all: bool) -> bool:
+    """按 term_present 语义复核；先做一次廉价的子串预筛，绝大多数候选在这里就被排除。
+
+    matching_text（繁简转换 + 去 URL）每条约 0.7 ms，对上万条候选逐条做太贵；
+    拉丁词经 NFKC + casefold 后的子串包含是 term_present 的必要条件。
+    """
+    folded = None
+    results = []
+    for t in terms:
+        if t.isascii():
+            if folded is None:
+                folded = unicodedata.normalize("NFKC", text).casefold()
+            if t not in folded:
+                results.append(False)
+                if need_all:
+                    return False
+                continue
+        results.append(None)                         # 待精确复核
+    low = None
+    for t, pre in zip(terms, results):
+        if pre is False:
+            continue
+        if low is None:
+            low = matching_text(text)
+        if term_present(low, t):
+            if not need_all:
+                return True
+        elif need_all:
+            return False
+    return need_all
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tg_messages (
@@ -183,7 +224,14 @@ class TgIndex:
     def __init__(self, path: str | Path | None = None):
         self.path = Path(path or DEFAULT_DB)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        self.conn = sqlite3.connect(str(self.path), check_same_thread=False, timeout=15)
+        # WAL：launchd 每小时深挖一轮、一次写几十万行，rollback journal 下写事务期间
+        # Web 端的检索会被整段阻塞甚至报 database is locked。WAL 读写互不阻塞。
+        try:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.Error:
+            pass                                     # 另一进程正持有写锁：下次打开再切
+        self.conn.execute("PRAGMA synchronous=NORMAL")
         existed = self.conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='tg_messages'"
         ).fetchone() is not None
@@ -191,6 +239,13 @@ class TgIndex:
         cols = {row[1] for row in self.conn.execute("PRAGMA table_info(tg_messages)")}
         if "tokens" not in cols:                     # 旧库迁移：补列，FTS 待 build_fts 回填
             self.conn.execute("ALTER TABLE tg_messages ADD COLUMN tokens TEXT")
+        ch_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(tg_channels)")}
+        if "link_count" not in ch_cols:              # 深挖按产出率分配页数用
+            self.conn.execute("ALTER TABLE tg_channels ADD COLUMN link_count INTEGER")
+        if "exhausted" not in ch_cols:               # 已挖到频道第一条消息
+            self.conn.execute(
+                "ALTER TABLE tg_channels ADD COLUMN exhausted INTEGER NOT NULL DEFAULT 0"
+            )
         self.conn.executescript(_FTS_SCHEMA)
         if not existed:
             # 全新索引：空集即完整，可以直接用 FTS（触发器会增量维护）
@@ -212,6 +267,8 @@ class TgIndex:
         if not messages:
             return 0
         now = time.time()
+        # 无链接消息的正文检索用不到，但频道/站点反查（找 t.me/xxx 提及）靠它，照存；
+        # 要省空间用 `pansearch index compact`（约 0.9 GB / 10 GB）。
         rows = [
             (m.channel, m.msg_id, m.posted_at, m.text,
              json.dumps(m.links, ensure_ascii=False), now,
@@ -269,24 +326,27 @@ class TgIndex:
         return {"fts_docs": done}
 
     def mark_channel(self, channel: str, newest: int | None, oldest: int | None,
-                     status: str = "ok") -> None:
-        cur = self.conn.execute(
-            "SELECT COUNT(*) FROM tg_messages WHERE channel = ?", (channel,)
+                     status: str = "ok", *, exhausted: bool | None = None) -> None:
+        count, links = self.conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(links != '[]'), 0) FROM tg_messages WHERE channel = ?",
+            (channel,),
         ).fetchone()
-        count = cur[0] if cur else 0
         prev = self.conn.execute(
-            "SELECT newest_id, oldest_id FROM tg_channels WHERE channel = ?", (channel,)
+            "SELECT newest_id, oldest_id, exhausted FROM tg_channels WHERE channel = ?", (channel,)
         ).fetchone()
         prev_newest = prev[0] if prev else None
         prev_oldest = prev[1] if prev else None
+        done = bool(prev[2]) if prev and exhausted is None else bool(exhausted)
 
         merged_newest = max([v for v in (newest, prev_newest) if v is not None], default=None)
         merged_oldest = min([v for v in (oldest, prev_oldest) if v is not None], default=None)
         self.conn.execute(
             "INSERT OR REPLACE INTO tg_channels"
-            " (channel, newest_id, oldest_id, msg_count, last_crawl, last_status)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (channel, merged_newest, merged_oldest, count, time.time(), status),
+            " (channel, newest_id, oldest_id, msg_count, last_crawl, last_status,"
+            "  link_count, exhausted)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (channel, merged_newest, merged_oldest, count, time.time(), status,
+             links, 1 if done else 0),
         )
         self.conn.commit()
 
@@ -295,6 +355,50 @@ class TgIndex:
             "SELECT oldest_id FROM tg_channels WHERE channel = ?", (channel,)
         ).fetchone()
         return row[0] if row and row[0] is not None else None
+
+    def newest_id(self, channel: str) -> int | None:
+        row = self.conn.execute(
+            "SELECT newest_id FROM tg_channels WHERE channel = ?", (channel,)
+        ).fetchone()
+        return row[0] if row and row[0] is not None else None
+
+    def channel_yield(self) -> dict[str, tuple[int, int | None, bool]]:
+        """{频道: (已索引消息数, 含链接消息数, 是否已挖到底)}，读 tg_channels 的缓存值。
+
+        link_count 为 None 表示旧库还没被新版 mark_channel 统计过（下一轮抓取后补齐）。
+        """
+        return {
+            ch: (int(n or 0), links, bool(done))
+            for ch, n, links, done in self.conn.execute(
+                "SELECT channel, msg_count, link_count, exhausted FROM tg_channels"
+            )
+        }
+
+    def compact(self, *, batch: int = 20000, vacuum: bool = False) -> dict:
+        """清空无链接消息的正文（保留行作为翻页/统计的占位），可选 VACUUM 回收磁盘。
+
+        代价：之后无法再从这些消息里反查 t.me/xxx 频道提及（频道扩容的主要候选来源）。
+        实测可省约 0.9 GB（10 GB 库）。VACUUM 需要约等于库大小的临时磁盘空间、
+        耗时数分钟，且期间独占数据库，所以默认不做。
+        """
+        last, cleared = 0, 0
+        while True:
+            row = self.conn.execute(
+                "SELECT MAX(rowid) FROM (SELECT rowid FROM tg_messages WHERE rowid > ?"
+                " ORDER BY rowid LIMIT ?)", (last, batch),
+            ).fetchone()
+            if not row or row[0] is None:
+                break
+            cur = self.conn.execute(
+                "UPDATE tg_messages SET text = '' WHERE rowid > ? AND rowid <= ?"
+                " AND links = '[]' AND text != ''", (last, row[0]),
+            )
+            cleared += max(0, cur.rowcount)
+            self.conn.commit()
+            last = row[0]
+        if vacuum:
+            self.conn.execute("VACUUM")
+        return {"cleared": cleared, "vacuumed": vacuum}
 
     def normalize_channel_keys(self, known: list[str]) -> int:
         """把历史遗留的频道键（大小写/别名不一致）归并到配置里的标准名。
@@ -343,43 +447,109 @@ class TgIndex:
         return self._search_like(terms, subjects, limit)
 
     def _search_fts(self, terms: list[str], subjects: list[str], limit: int) -> list[dict] | None:
+        """分层召回，每层都由倒排索引直接给出，不再"多取 4 倍再回 Python 重排"。
+
+        层级（前一层不够 limit 才往下走，已取到的消息不重复）：
+          1. 全部查询词都出现（主题词 + 画质/格式等限定词）
+          2. 全部主题词都出现
+          3. 任一主题词出现（仅多主题词查询；打分阶段会给低相关）
+
+        原来是"主题词 OR 召回 → ORDER BY rank 取 4×limit → Python 逐条归一化复核"。
+        索引涨到 473 万条后：ORDER BY rank 要给**每个**命中算 bm25（「4K」4.5 s），
+        复核 1600 条长正文又是 1 秒多。现在大候选集按 rowid 取（毫秒级），
+        纯中文主题词的 bigram 短语已与 term_present 等价，不再复核。
+        """
         phrases = []
+        recheck: list[str] = []
         for t in subjects:
             phrase = match_phrase(t)
             if phrase is None:
-                return None      # 含单字素（bigram 索引覆盖不了）-> 回退 LIKE
-            if re.fullmatch(r"[a-z]{2,}", t):
+                # 含孤立单个汉字（「全DLC」「哆啦A梦」「书」）：bigram 短语表达不了。
+                # 各 token 分别 AND，单个汉字用前缀匹配以它开头的 bigram，再逐条复核。
+                # 原来这里回退全表 LIKE，473 万条索引上要 45~75 秒（fulltest 里直接超时）。
+                # 词里还有别的 token 时干脆不把孤立汉字交给 FTS：「全」* 会展开成
+                # 全集/全部/… 的全部 bigram，合并上百万条倒排，比复核本身还慢。
+                toks = ngram_tokens(t)
+                solid = [x for x in toks if len(x) > 1 or x.isascii()]
+                if solid:
+                    phrase = "(" + " AND ".join(f'"{x}"' for x in solid) + ")"
+                elif toks:
+                    phrase = "(" + " AND ".join(f'"{x}"*' for x in toks) + ")"
+                else:
+                    return None
+            elif re.fullmatch(r"[a-z]{4,}", t):
                 # 索引把 Serum2 当整词；前缀召回后按词边界剔除 serumology。
+                # 两三个字母的词（fl、ps）前缀会展开成 flac/flv/… 大量无关 token，只做整词匹配。
                 phrase += "*"
+            if not (_PURE_CJK.fullmatch(t) and len(t) > 1):
+                # 英文/符号词要复核词边界与 URL 子串（Serumology、C++ 与 C#、链接里的 c#）；
+                # 纯中文多字词的 bigram 短语已与 term_present 等价，不再复核。
+                recheck.append(t)
             phrases.append(phrase)
         if not phrases:
             return None
-        match = " OR ".join(phrases)
-        # 多取候选再重排：FTS 负责"用倒排索引快速找候选 + BM25 序"，
-        # 命中词数与时间序仍按原有语义在 Python 里排。
-        fetch = max(limit * 4, 200)
+        extras = [p for t in terms if t not in subjects and (p := match_phrase(t))]
+
+        base = " AND ".join(phrases)
+        # (MATCH 表达式, 命中词数, 需要复核的词, 复核语义 all/any)
+        tiers: list[tuple[str, int, list[str], bool]] = []
+        if extras:
+            tiers.append((" AND ".join([base, *extras]), len(phrases) + len(extras), recheck, True))
+        tiers.append((base, len(phrases), recheck, True))
+        if len(phrases) > 1:
+            # OR 层不知道是哪个主题词命中的，只要任一主题词真实出现即可
+            tiers.append((" OR ".join(phrases), 1, list(subjects), False))
+
+        out: list[dict] = []
+        seen: set[int] = set()
+        # 复核（繁简归一 + 正则）每条约 0.7 ms；候选多而命中率低时给复核设个时间上限，
+        # 宁可少几条也不能让 TG 源拖到超时、一条都交不出。只计复核本身的耗时：
+        # 机器繁忙时 SQL 变慢不该把预算吃光（实测负载 57 时「FL Studio 破解」因此 0 条）。
+        spent = 0.0
         try:
-            rows = self.conn.execute(
-                "SELECT m.channel, m.msg_id, m.posted_at, m.text, m.links, bm25(tg_fts)"
-                " FROM tg_fts JOIN tg_messages m ON m.rowid = tg_fts.rowid"
-                " WHERE tg_fts MATCH ? AND m.links != '[]' ORDER BY rank LIMIT ?",
-                (match, fetch),
-            ).fetchall()
+            for match, hits, check, need_all in tiers:
+                want = limit - len(out)
+                if want <= 0 or (check and spent > RECHECK_BUDGET_SECONDS):
+                    break
+                big = self.conn.execute(
+                    "SELECT COUNT(*) FROM (SELECT 1 FROM tg_fts WHERE tg_fts MATCH ? LIMIT ?)",
+                    (match, RANK_MAX_CANDIDATES + 1),
+                ).fetchone()[0] > RANK_MAX_CANDIDATES
+                order = "tg_fts.rowid DESC" if big else "rank"
+                # 游标惰性读取：不复核时读够 want 条就停；复核时最多检查 SCAN_CAP 条
+                cur = self.conn.execute(
+                    "SELECT m.rowid, m.channel, m.msg_id, m.posted_at, m.text, m.links,"
+                    f" {'0' if big else 'bm25(tg_fts)'}"
+                    " FROM tg_fts JOIN tg_messages m ON m.rowid = tg_fts.rowid"
+                    f" WHERE tg_fts MATCH ? AND m.links != '[]' ORDER BY {order} LIMIT ?",
+                    (match, SCAN_CAP if check else want + len(seen)),
+                )
+                tier: list[dict] = []
+                for rowid, channel, msg_id, posted_at, text, links, bm in cur:
+                    if rowid in seen:
+                        continue
+                    if check:
+                        t0 = time.perf_counter()
+                        passed = _recheck(text or "", check, need_all)
+                        spent += time.perf_counter() - t0
+                        if not passed:
+                            if spent > RECHECK_BUDGET_SECONDS:
+                                break
+                            continue
+                    seen.add(rowid)
+                    tier.append({
+                        "channel": channel, "msg_id": msg_id, "posted_at": posted_at,
+                        "text": text, "links": json.loads(links or "[]"),
+                        "hits": hits, "bm25": -float(bm or 0.0),   # 越大越好
+                    })
+                    if len(tier) >= want:
+                        break
+                # 同层内 bm25 高者优先、同分按时间新→旧（候选太多时 bm25 全为 0，即纯时间序）
+                tier.sort(key=lambda d: d["posted_at"] or "", reverse=True)
+                tier.sort(key=lambda d: -d["bm25"])
+                out.extend(tier)
         except sqlite3.OperationalError:
             return None
-        out: list[dict] = []
-        for channel, msg_id, posted_at, text, links, bm in rows:
-            low = matching_text(text or "")
-            if not any(term_present(low, t) for t in subjects):
-                continue
-            out.append({
-                "channel": channel, "msg_id": msg_id, "posted_at": posted_at,
-                "text": text, "links": json.loads(links or "[]"),
-                "hits": sum(1 for t in terms if term_present(low, t)),
-                "bm25": -float(bm or 0.0),          # 越大越好
-            })
-        out.sort(key=lambda d: (d["posted_at"] or ""), reverse=True)
-        out.sort(key=lambda d: (-d["hits"], -d["bm25"]))
         return out[:limit]
 
     def _search_like(self, terms: list[str], subjects: list[str], limit: int) -> list[dict]:
@@ -475,18 +645,33 @@ class TgCrawler:
     async def crawl_channel(self, client: httpx.AsyncClient, channel: str,
                             pages: int, *, deepen: bool = False) -> None:
         before: int | None = None
+        # 抓最新时翻到上次已有的位置就停：之前每轮都把 N 页全翻一遍，
+        # 绝大部分是重复消息。
+        known_newest = None if deepen else self.index.newest_id(channel)
         if deepen:
             before = self.index.oldest_id(channel)
 
         got: list[TgMessage] = []
         status = "ok"
+        exhausted = None
         for page in range(pages):
             msgs, status = await self._page(client, channel, before)
             self.stats["pages"] += 1
             if not msgs:
+                if deepen and status == "empty" and before is not None:
+                    exhausted = True         # 翻过了频道第一条消息
+                break
+            oldest = min(m.msg_id for m in msgs)
+            if before is not None and oldest >= before:
+                # t.me 对越界的 before 会回落到最新页：没往前走就说明已到底
+                if deepen:
+                    exhausted = True
                 break
             got.extend(msgs)
-            before = min(m.msg_id for m in msgs)
+            before = oldest
+            if known_newest is not None and oldest <= known_newest:
+                self.stats["caught_up"] = self.stats.get("caught_up", 0) + 1
+                break
             if self.pages_delay:
                 await asyncio.sleep(self.pages_delay)
 
@@ -498,21 +683,52 @@ class TgCrawler:
                 newest=max(m.msg_id for m in got),
                 oldest=min(m.msg_id for m in got),
                 status=status,
+                exhausted=exhausted,
             )
         else:
-            self.index.mark_channel(channel, None, None, status=status)
+            self.index.mark_channel(channel, None, None, status=status, exhausted=exhausted)
             if status.startswith(("err:", "http:")):
                 self.stats["errors"] += 1
         self.stats["channels"] += 1
 
     async def crawl(self, channels: list[str], pages: int = 1, *,
                     deepen: bool = False) -> dict:
+        plan = {ch: pages for ch in channels}
+        if deepen:
+            # 深挖按频道产出率分配页数；已挖到底的频道跳过
+            yields = self.index.channel_yield()
+            for ch in channels:
+                msgs, links, done = yields.get(ch, (0, None, False))
+                plan[ch] = 0 if done else deepen_pages(pages, msgs, links)
+            self.stats["skipped_exhausted"] = sum(1 for n in plan.values() if n == 0)
+            self.stats["pages_planned"] = sum(plan.values())
         async with httpx.AsyncClient(
             timeout=self.timeout, follow_redirects=True, http2=True,
             headers={"User-Agent": UA},
         ) as client:
             await asyncio.gather(
-                *(self.crawl_channel(client, ch, pages, deepen=deepen) for ch in channels),
+                *(self.crawl_channel(client, ch, n, deepen=deepen)
+                  for ch, n in plan.items() if n > 0),
                 return_exceptions=True,
             )
         return dict(self.stats)
+
+
+def deepen_pages(pages: int, msg_count: int, link_count: int | None) -> int:
+    """按"含链接消息占比"给深挖分配页数。
+
+    频道清单里混着大量闲聊/资讯频道，平均分页数等于把一半预算花在不产出链接的
+    历史上。样本太少（<200 条）或旧库还没统计时给满额，避免误杀新频道。
+    """
+    if pages <= 0:
+        return 0
+    if link_count is None or msg_count < 200:
+        return pages
+    ratio = link_count / msg_count
+    if ratio >= 0.3:
+        return pages
+    if ratio >= 0.1:
+        return max(1, pages // 2)
+    if ratio >= 0.02:
+        return max(1, pages // 5)
+    return 1

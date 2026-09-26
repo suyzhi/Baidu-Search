@@ -6,75 +6,108 @@
 <title>pansearch · 全网网盘资源搜索器</title>
 <style>
   :root{
+    --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --border:#d8dee4;
+    --fg:#1f2328; --dim:#656d76; --accent:#1a7f64; --accent-bg:rgba(26,127,100,.10);
+    --link:#0969da; --green:#1a7f37; --yellow:#9a6700; --red:#cf222e;
+    --on-accent:#ffffff; --shadow:0 1px 2px rgba(31,35,40,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2a3240;
+      --fg:#e6edf3; --dim:#8b949e; --accent:#37c9a0; --accent-bg:rgba(55,201,160,.14);
+      --link:#58a6ff; --green:#3fb950; --yellow:#d29922; --red:#f85149;
+      --on-accent:#05221a; --shadow:none;
+    }
+  }
+  :root[data-theme="dark"]{
     --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2a3240;
-    --fg:#e6edf3; --dim:#8b949e; --accent:#37c9a0; --accent2:#2f81f7;
-    --green:#3fb950; --yellow:#d29922; --red:#f85149;
+    --fg:#e6edf3; --dim:#8b949e; --accent:#37c9a0; --accent-bg:rgba(55,201,160,.14);
+    --link:#58a6ff; --green:#3fb950; --yellow:#d29922; --red:#f85149;
+    --on-accent:#05221a; --shadow:none;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);
     font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
-  a{color:var(--accent2);text-decoration:none}
+  a{color:var(--link);text-decoration:none}
   a:hover{text-decoration:underline}
-  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 80px}
-  header{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+  button{font:inherit;color:inherit}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 16px 80px}
+  header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
   h1{font-size:22px;margin:0;letter-spacing:.5px}
   h1 span{color:var(--accent)}
-  .tagline{color:var(--dim);font-size:13px}
+  .tagline{color:var(--dim);font-size:13px;flex:1}
+  .theme{background:none;border:1px solid var(--border);border-radius:8px;padding:3px 10px;
+    color:var(--dim);font-size:13px;cursor:pointer}
 
-  .searchbar{display:flex;gap:10px;margin:22px 0 14px}
-  input[type=text]{flex:1;padding:14px 16px;font-size:16px;border-radius:10px;
-    border:1px solid var(--border);background:var(--panel);color:var(--fg);outline:none}
-  input[type=text]:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(55,201,160,.15)}
-  button{padding:14px 26px;font-size:15px;font-weight:600;border-radius:10px;border:0;
-    background:var(--accent);color:#05221a;cursor:pointer}
-  button:hover{filter:brightness(1.1)}
-  button:disabled{opacity:.5;cursor:not-allowed}
+  .searchbar{display:flex;gap:10px;margin:20px 0 14px}
+  input[type=search]{flex:1;min-width:0;padding:13px 16px;font-size:16px;border-radius:10px;
+    border:1px solid var(--border);background:var(--panel);color:var(--fg);outline:none;box-shadow:var(--shadow)}
+  input[type=search]:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}
+  .go{padding:13px 24px;font-size:15px;font-weight:600;border-radius:10px;border:0;
+    background:var(--accent);color:var(--on-accent);cursor:pointer;white-space:nowrap}
+  .go:hover{filter:brightness(1.08)}
 
-  .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:18px}
-  .chip{padding:6px 13px;border-radius:999px;border:1px solid var(--border);
-    background:var(--panel);color:var(--dim);font-size:13px;cursor:pointer;user-select:none}
-  .chip.on{background:rgba(55,201,160,.15);border-color:var(--accent);color:var(--accent)}
-  .chip.pri.on{background:rgba(47,129,247,.18);border-color:var(--accent2);color:#79c0ff}
+  .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+  .chip{padding:5px 12px;border-radius:999px;border:1px solid var(--border);
+    background:var(--panel);color:var(--dim);font-size:13px;cursor:pointer}
+  .chip .n{font-variant-numeric:tabular-nums;opacity:.75;margin-left:4px}
+  .chip.on{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}
+  .chip.zero{opacity:.45}
+  .toggles{display:flex;flex-wrap:wrap;gap:6px 16px;margin-bottom:16px}
   label.toggle{display:flex;align-items:center;gap:6px;color:var(--dim);font-size:13px;cursor:pointer}
 
-  .stats{padding:12px 16px;border:1px solid var(--border);border-radius:10px;
-    background:var(--panel);color:var(--dim);font-size:13px;margin-bottom:18px;display:none}
-  .stats.show{display:block}
-  .stats b{color:var(--fg)}
+  .sources{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .src{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:2px 9px;border-radius:999px;
+    border:1px solid var(--border);background:var(--panel);color:var(--dim);font-variant-numeric:tabular-nums}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim)}
+  .dot.ok{background:var(--green)} .dot.empty{background:var(--border)}
+  .dot.degraded{background:var(--yellow)} .dot.timeout,.dot.error{background:var(--red)}
+  .dot.run{background:var(--accent);animation:pulse 1s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.3}}
+
+  .summary{font-size:13px;color:var(--dim);margin-bottom:14px}
+  .summary b{color:var(--fg);font-variant-numeric:tabular-nums}
+  .summary .warn{color:var(--yellow)}
+  .summary details{margin-top:6px}
+  .summary summary{cursor:pointer;width:max-content}
+  .summary .more{padding:8px 12px;margin-top:6px;border:1px solid var(--border);border-radius:8px;
+    background:var(--panel);line-height:1.9}
 
   .card{border:1px solid var(--border);border-radius:12px;background:var(--panel);
-    padding:16px 18px;margin-bottom:12px}
-  .card.dead{opacity:.45}
-  .card-top{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}
+    padding:14px 16px;margin-bottom:10px;box-shadow:var(--shadow)}
+  .card.dead{opacity:.5}
   .title{font-weight:600;font-size:15px;word-break:break-word}
-  .badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
-  .badge{font-size:12px;padding:2px 9px;border-radius:6px;background:var(--panel2);
+  .badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .badge{font-size:12px;padding:1px 8px;border-radius:6px;background:var(--panel2);
     color:var(--dim);border:1px solid var(--border);white-space:nowrap}
-  .badge.ok{color:var(--green);border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.1)}
-  .badge.warn{color:var(--yellow);border-color:rgba(210,153,34,.4);background:rgba(210,153,34,.1)}
-  .badge.bad{color:var(--red);border-color:rgba(248,81,73,.4);background:rgba(248,81,73,.1)}
-  .badge.pan{color:#79c0ff;border-color:rgba(47,129,247,.4);background:rgba(47,129,247,.1)}
-
-  .linkrow{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .badge.ok{color:var(--green);border-color:currentColor}
+  .badge.warn{color:var(--yellow);border-color:currentColor}
+  .badge.bad{color:var(--red);border-color:currentColor}
+  .badge.pan{color:var(--link);border-color:currentColor}
+  .linkrow{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
   .link{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
-    color:var(--accent);word-break:break-all;flex:1;min-width:260px}
+    color:var(--accent);word-break:break-all;flex:1;min-width:min(260px,100%)}
   .pwd{font-family:ui-monospace,Menlo,monospace;font-weight:700;color:var(--yellow);
-    background:rgba(210,153,34,.12);padding:3px 10px;border-radius:6px;border:1px solid rgba(210,153,34,.3)}
-  .mini{padding:5px 11px;font-size:12px;font-weight:600;border-radius:7px;
+    padding:2px 9px;border-radius:6px;border:1px solid currentColor}
+  .mini{padding:4px 11px;font-size:12px;font-weight:600;border-radius:7px;
     background:var(--panel2);color:var(--fg);border:1px solid var(--border);cursor:pointer}
-  .mini:hover{border-color:var(--accent);color:var(--accent)}
-  .note{margin-top:9px;font-size:12px;color:var(--dim)}
+  .mini:hover{border-color:var(--accent);color:var(--accent);text-decoration:none}
+  .note{margin-top:7px;font-size:12px;color:var(--dim);word-break:break-all}
   .empty{text-align:center;color:var(--dim);padding:50px 0}
+  .morebtn{display:block;margin:16px auto 0;padding:9px 22px;border-radius:9px;
+    border:1px solid var(--border);background:var(--panel);color:var(--fg);cursor:pointer}
   .spinner{display:inline-block;width:13px;height:13px;border:2px solid var(--dim);
     border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;
     vertical-align:-2px;margin-right:7px}
   @keyframes spin{to{transform:rotate(360deg)}}
-  .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(80px);
-    background:var(--accent);color:#05221a;padding:10px 22px;border-radius:10px;
+  .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(90px);
+    background:var(--accent);color:var(--on-accent);padding:9px 20px;border-radius:10px;
     font-weight:600;font-size:14px;transition:transform .25s;z-index:99}
   .toast.show{transform:translateX(-50%) translateY(0)}
   footer{margin-top:34px;color:var(--dim);font-size:12px;line-height:1.9;
     border-top:1px solid var(--border);padding-top:16px}
+  @media (max-width:560px){ .go{padding:13px 16px} .tagline{flex-basis:100%} }
 </style>
 </head>
 <body>
@@ -82,77 +115,257 @@
   <header>
     <h1>pan<span>search</span></h1>
     <div class="tagline">全网网盘资源搜索器 · 百度优先 · 带链接有效性校验</div>
+    <button class="theme" id="theme" type="button" title="切换深色/浅色">◐ 主题</button>
   </header>
 
-  <div class="searchbar">
-    <input type="text" id="kw" placeholder="输入关键词，例如：三体 / 周杰伦 / Python编程" autocomplete="off">
-    <button id="go">搜索</button>
-  </div>
+  <form class="searchbar" id="form" role="search">
+    <input type="search" id="kw" placeholder="输入关键词，例如：三体 / 周杰伦 / Python编程（按 / 聚焦）"
+           autocomplete="off" aria-label="搜索关键词">
+    <button class="go" id="go" type="submit">搜索</button>
+  </form>
 
-  <div class="filters" id="typeFilters">
-    <span class="chip pri on" data-type="">全部</span>
-    <span class="chip" data-type="baidu">百度网盘</span>
-    <span class="chip" data-type="quark">夸克</span>
-    <span class="chip" data-type="aliyun">阿里云盘</span>
-    <span class="chip" data-type="115">115</span>
-    <span class="chip" data-type="xunlei">迅雷</span>
-    <span class="chip" data-type="tianyi">天翼</span>
-    <span class="chip" data-type="123">123网盘</span>
-    <span class="chip" data-type="uc">UC</span>
-    <span class="chip" data-type="magnet">磁力</span>
+  <div class="filters" id="typeFilters" role="group" aria-label="网盘类型"></div>
+  <div class="toggles">
     <label class="toggle"><input type="checkbox" id="aliveOnly" checked> 只看存活</label>
     <label class="toggle" title="连「提取码不对」和「不支持验活的网盘（迅雷/UC/123/PikPak/磁力）」也一并剔除">
-      <input type="checkbox" id="strict"> 严格剔除
-    </label>
+      <input type="checkbox" id="strict"> 严格剔除</label>
     <label class="toggle"><input type="checkbox" id="doVerify" checked> 校验链接</label>
+    <label class="toggle" title="按来源过滤成人内容源（javdb / sukebei）">
+      <input type="checkbox" id="sfw" checked> 过滤成人源</label>
   </div>
 
-  <div class="stats" id="stats"></div>
+  <div class="sources" id="sources" aria-live="polite"></div>
+  <div class="summary" id="summary"></div>
   <div id="results"></div>
 
   <footer>
     <div>⚠️ 本工具仅做<b>公开链接的检索与索引</b>，不下载、不存储、不破解、不绕过验证码。搜索结果均来自第三方公开索引，请自行判断合法性与版权。</div>
-    <div>数据源：PanSou 聚合引擎（48 插件 + TG 频道）｜ Brave / 360 搜索引擎定向检索</div>
+    <div>数据源：Telegram 频道本地索引 ｜ PanSou 聚合引擎 ｜ B 站简介与评论 ｜ BT 站 ｜ 资源站站内搜索 ｜ 多搜索引擎 ｜ 公开 API</div>
+    <div>切换网盘类型在本地筛选，不会重新搜索；验活预算按全部类型的相关性分配。命令行版：<b>pansearch search</b>。</div>
   </footer>
 </div>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status"></div>
 
 <script>
 const $ = s => document.querySelector(s);
-const resultsEl = $('#results'), statsEl = $('#stats'), goBtn = $('#go');
-let activeType = '';
-let activeSearch = null, searchGeneration = 0;
+const resultsEl = $('#results'), summaryEl = $('#summary'), sourcesEl = $('#sources');
+const PAGE = 30, FETCH_LIMIT = 300;
+const TYPES = [['', '全部'], ['baidu', '百度网盘'], ['quark', '夸克'], ['aliyun', '阿里云盘'],
+  ['115', '115'], ['xunlei', '迅雷'], ['tianyi', '天翼'], ['123', '123网盘'], ['uc', 'UC'],
+  ['pikpak', 'PikPak'], ['magnet', '磁力'], ['direct', '直链']];
+const SOURCE_LABELS = {telegram: 'TG 频道', pansou: 'PanSou', bilibili: 'B 站', btsearch: 'BT',
+  apisources: '公开 API', sitesearch: '资源站', websearch: '搜索引擎'};
+const STATUS_TEXT = {ok: '正常', empty: '无结果', degraded: '部分失败', timeout: '超时', error: '失败'};
 
-document.querySelectorAll('#typeFilters .chip').forEach(chip => {
-  chip.onclick = () => {
-    document.querySelectorAll('#typeFilters .chip').forEach(c => c.classList.remove('on'));
-    chip.classList.add('on');
-    activeType = chip.dataset.type;
-    if ($('#kw').value.trim()) doSearch();
-  };
+let activeType = '', shown = PAGE;
+let activeSearch = null, generation = 0;
+let last = null, lastPending = false, lastSecs = '0';
+const cards = new Map();            // url -> {sig, el}：进度帧之间复用节点，列表不闪、不丢焦点
+
+// ---- 主题（仅本机偏好，存不了也不影响使用）----
+function setTheme(t){
+  if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+}
+try { setTheme(localStorage.getItem('pansearch-theme')); } catch (e) {}
+$('#theme').onclick = () => {
+  const dark = document.documentElement.dataset.theme
+    ? document.documentElement.dataset.theme === 'dark'
+    : matchMedia('(prefers-color-scheme: dark)').matches;
+  const next = dark ? 'light' : 'dark';
+  setTheme(next);
+  try { localStorage.setItem('pansearch-theme', next); } catch (e) {}
+};
+
+// ---- 网盘类型：本地筛选 ----
+$('#typeFilters').innerHTML = TYPES.map(([v, label]) =>
+  '<button type="button" class="chip' + (v ? '' : ' on') + '" data-type="' + v + '" aria-pressed="' + !v + '">' +
+  label + '<span class="n"></span></button>').join('');
+$('#typeFilters').addEventListener('click', e => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  activeType = chip.dataset.type;
+  shown = PAGE;
+  syncChips();
+  syncUrl(false);
+  if (last) renderResults();
 });
+function syncChips(){
+  const counts = (last && last.type_counts) || {};
+  const total = last ? last.total : 0;
+  document.querySelectorAll('#typeFilters .chip').forEach(c => {
+    const v = c.dataset.type, on = v === activeType;
+    c.classList.toggle('on', on);
+    c.setAttribute('aria-pressed', on);
+    const n = v ? (counts[v] || 0) : total;
+    c.querySelector('.n').textContent = last ? n : '';
+    c.classList.toggle('zero', !!last && !n && !on);
+  });
+}
 
-$('#kw').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
-goBtn.onclick = doSearch;
-$('#aliveOnly').onchange = () => { if ($('#kw').value.trim()) doSearch(); };
-$('#strict').onchange = () => { if ($('#kw').value.trim()) doSearch(); };
-$('#doVerify').onchange = () => { if ($('#kw').value.trim()) doSearch(); };
+// ---- 搜索触发 ----
+$('#form').addEventListener('submit', e => { e.preventDefault(); doSearch(); });
+['#aliveOnly', '#strict', '#doVerify', '#sfw'].forEach(id =>
+  $(id).addEventListener('change', () => { if ($('#kw').value.trim()) doSearch(); }));
+document.addEventListener('keydown', e => {
+  if (e.key === '/' && document.activeElement !== $('#kw')) { e.preventDefault(); $('#kw').focus(); }
+});
+window.addEventListener('popstate', () => { if (readUrl()) doSearch(false); });
+
+function syncUrl(push){
+  const p = new URLSearchParams();
+  const kw = $('#kw').value.trim();
+  if (kw) p.set('q', kw);
+  if (activeType) p.set('type', activeType);
+  if ($('#strict').checked) p.set('strict', '1');
+  if (!$('#aliveOnly').checked) p.set('all', '1');
+  const url = location.pathname + (p.toString() ? '?' + p : '');
+  if (url === location.pathname + location.search) return;
+  history[push ? 'pushState' : 'replaceState'](null, '', url);
+}
+function readUrl(){
+  const p = new URLSearchParams(location.search);
+  $('#kw').value = p.get('q') || '';
+  activeType = p.get('type') || '';
+  $('#strict').checked = p.get('strict') === '1';
+  $('#aliveOnly').checked = p.get('all') !== '1';
+  syncChips();
+  return !!$('#kw').value.trim();
+}
 
 function esc(s){
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-
 function toast(msg){
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 1400);
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), 1400);
+}
+resultsEl.addEventListener('click', e => {
+  const btn = e.target.closest('[data-copy]');
+  if (btn) navigator.clipboard.writeText(btn.dataset.copy).then(
+    () => toast('已复制链接'), () => toast('复制失败，请手动选择'));
+  if (e.target.closest('.morebtn')) { shown += PAGE; renderResults(); }
+});
+
+async function doSearch(push = true){
+  const kw = $('#kw').value.trim();
+  if (!kw) return;
+  if (activeSearch) activeSearch.abort();
+  const controller = new AbortController();
+  activeSearch = controller;
+  const gen = ++generation;
+  syncUrl(push);
+  document.title = kw + ' · pansearch';
+  last = null; shown = PAGE; cards.clear();
+  syncChips();
+  resultsEl.innerHTML = '<div class="empty"><span class="spinner"></span>正在检索，有结果后立即显示…</div>';
+  summaryEl.innerHTML = ''; sourcesEl.innerHTML = '';
+  const params = new URLSearchParams({kw, limit: FETCH_LIMIT,
+    alive_only: $('#aliveOnly').checked, verify: $('#doVerify').checked,
+    strict: $('#strict').checked, sfw: $('#sfw').checked});
+  const t0 = Date.now();
+  let complete = false;
+  try {
+    const resp = await fetch('/api/search/stream?' + params, {signal: controller.signal});
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const reader = resp.body.getReader(), decoder = new TextDecoder();
+    let buffer = '';
+    const receive = line => {
+      if (!line.trim() || gen !== generation) return;
+      const event = JSON.parse(line);
+      if (event.event === 'error') throw new Error(event.data.message);
+      if (event.event !== 'progress' && event.event !== 'complete') return;
+      complete = event.event === 'complete';
+      last = event.data; lastPending = !complete;
+      lastSecs = ((Date.now() - t0) / 1000).toFixed(1);
+      render();
+    };
+    while (true) {
+      const {value, done} = await reader.read();
+      if (gen !== generation) return;
+      buffer += decoder.decode(value, {stream: !done});
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) receive(line);
+      if (done) { if (buffer.trim()) receive(buffer); break; }
+    }
+    if (!complete) throw new Error('连接中断，搜索尚未完成');
+  } catch (err) {
+    if (err.name === 'AbortError' || gen !== generation) return;
+    if (last) {
+      lastPending = false; render();
+      summaryEl.insertAdjacentHTML('beforeend', '<div class="warn">已保留部分结果：' + esc(err.message) + '</div>');
+    } else {
+      resultsEl.innerHTML = '<div class="empty">搜索失败：' + esc(err.message) + '</div>';
+    }
+  } finally {
+    if (gen === generation) activeSearch = null;
+  }
 }
 
-function copy(text, label){
-  navigator.clipboard.writeText(text).then(
-    () => toast('已复制' + label),
-    () => toast('复制失败，请手动选择')
-  );
+function render(){
+  renderSources();
+  renderSummary();
+  syncChips();
+  renderResults();
+}
+
+function renderSources(){
+  const rep = last.source_report || {};
+  const names = [...new Set([...(last.used_sources || []), ...Object.keys(rep)])];
+  sourcesEl.innerHTML = names.map(n => {
+    const r = rep[n];
+    const cls = r ? r.status : (lastPending ? 'run' : 'empty');
+    const tip = r ? (STATUS_TEXT[r.status] || r.status) + (r.error ? '：' + r.error : '') : '检索中';
+    return '<span class="src" title="' + esc(tip) + '"><span class="dot ' + esc(cls) + '"></span>' +
+      esc(SOURCE_LABELS[n] || n) + (r ? ' ' + r.hits + ' · ' + r.seconds + 's' : '') + '</span>';
+  }).join('');
+}
+
+function renderSummary(){
+  const d = last, vs = d.verify_stats || {};
+  const head = [];
+  if (lastPending) head.push('<span class="spinner"></span>已找到部分结果，正在继续检索与校验');
+  head.push('去重后 <b>' + d.dedup_count + '</b> 条（原始 ' + d.raw_hits + '）');
+  head.push('存活 <b>' + d.alive_count + '</b>');
+  head.push('耗时 <b>' + lastSecs + 's</b>');
+  if (d.from_cache) head.push('来自查询缓存');
+  let html = '<div>' + head.join(' ｜ ') + '</div>';
+
+  if ((d.degraded || []).length)
+    html += '<div class="warn">⚠ ' + d.degraded.map(n => esc(SOURCE_LABELS[n] || n)).join('、') +
+      ' 失败/超时，本次结果可能不全</div>';
+  if (vs.unsupported && !d.strict)
+    html += '<div class="warn">⚠ ' + vs.unsupported + ' 条结果来自不支持验活的网盘（迅雷/UC/123/PikPak/磁力），' +
+      '未经验证 —— 勾选「严格剔除」可一并去掉</div>';
+
+  const more = [];
+  if (d.pruned) more.push('剔除失效 <b>' + d.pruned + '</b>');
+  if (d.irrelevant_pruned) more.push('过滤无关 <b>' + d.irrelevant_pruned + '</b>');
+  if (d.adult_pruned || d.nsfw_pruned) more.push('过滤成人源 <b>' + ((d.adult_pruned || 0) + (d.nsfw_pruned || 0)) + '</b>');
+  if (d.verify_timeout_skipped) more.push('验活超时待校验 <b>' + d.verify_timeout_skipped + '</b>');
+  if (d.verify_budget_skipped) more.push('超出验活预算 <b>' + d.verify_budget_skipped + '</b>');
+  if (vs.checked !== undefined)
+    more.push('验活请求 <b>' + (vs.checked || 0) + '</b>（缓存命中 ' + (vs.cache_hit || 0) +
+      (vs.early ? '，边抓边验 ' + vs.early : '') + '）');
+  const lines = [];
+  if (more.length) lines.push(more.join(' ｜ '));
+  const bs = vs.by_service || {};
+  if (Object.keys(bs).length)
+    lines.push('按网盘验活：' + Object.entries(bs).map(([n, s]) => esc(n) + ' ' + s.alive + '活/' + s.dead + '死' +
+      (s.other ? '/' + s.other + '其他' : '')).join(' ｜ '));
+  const qs = d.queries_used || [];
+  if (qs.length > 1) lines.push('自动补搜：' + qs.slice(1).map(esc).join('、'));
+  const timings = Object.entries(d.timings || {}).filter(([k]) => k !== 'elapsed');
+  if (timings.length) lines.push('阶段耗时：' + timings.map(([k, v]) => esc(k) + ' ' + Number(v).toFixed(2) + 's').join(' ｜ '));
+  Object.entries(d.errors || {}).forEach(([k, v]) =>
+    lines.push('<span class="warn">⚠ ' + esc(SOURCE_LABELS[k] || k) + '：' + esc(String(v).slice(0, 160)) + '</span>'));
+  if (lines.length) {
+    const open = summaryEl.querySelector('details') && summaryEl.querySelector('details').open;
+    html += '<details' + (open ? ' open' : '') + '><summary>详细统计</summary><div class="more">' +
+      lines.join('<br>') + '</div></details>';
+  }
+  summaryEl.innerHTML = html;
 }
 
 function statusClass(s){
@@ -162,162 +375,65 @@ function statusClass(s){
   return '';
 }
 
-async function doSearch(){
-  const kw = $('#kw').value.trim();
-  if (!kw) return;
-  if (activeSearch) activeSearch.abort();
-  const controller = new AbortController();
-  activeSearch = controller;
-  const generation = ++searchGeneration;
-  goBtn.textContent = '重新搜索';
-  resultsEl.innerHTML = '<div class="empty"><span class="spinner"></span>正在检索，有结果后立即显示…</div>';
-  statsEl.classList.remove('show');
-  const params = new URLSearchParams({kw, limit: 100,
-    alive_only: $('#aliveOnly').checked, verify: $('#doVerify').checked,
-    strict: $('#strict').checked});
-  if (activeType) params.set('types', activeType);
-  const t0 = Date.now();
-  let hasResults = false, complete = false;
-  try {
-    const resp = await fetch('/api/search/stream?' + params, {signal: controller.signal});
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const reader = resp.body.getReader(), decoder = new TextDecoder();
-    let buffer = '';
-    function receive(line) {
-      if (!line.trim() || generation !== searchGeneration) return;
-      const event = JSON.parse(line);
-      if (event.event === 'error') throw new Error(event.data.message);
-      if (event.event !== 'progress' && event.event !== 'complete') return;
-      complete = event.event === 'complete';
-      hasResults = event.data.results.length > 0;
-      render(event.data, ((Date.now() - t0) / 1000).toFixed(1), !complete);
-    }
-    while (true) {
-      const {value, done} = await reader.read();
-      if (generation !== searchGeneration) return;
-      buffer += decoder.decode(value, {stream: !done});
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      for (const line of lines) receive(line);
-      if (done) {
-        if (buffer.trim()) receive(buffer);
-        break;
-      }
-    }
-    if (!complete) throw new Error('连接中断，搜索尚未完成');
-  } catch (err) {
-    if (err.name === 'AbortError' || generation !== searchGeneration) return;
-    if (hasResults) {
-      statsEl.innerHTML += '<br><span style="color:var(--yellow)">已保留部分结果：' + esc(err.message) + '</span>';
-    } else {
-      resultsEl.innerHTML = '<div class="empty">搜索失败：' + esc(err.message) + '</div>';
-    }
-  } finally {
-    if (generation === searchGeneration) {
-      activeSearch = null;
-      goBtn.textContent = '搜索';
-    }
-  }
+function cardHtml(r){
+  const badges = [
+    '<span class="badge ' + statusClass(r.status) + '">' + esc(r.status_label) + '</span>',
+    '<span class="badge pan">' + esc(r.pan_label) + '</span>'
+  ];
+  if (r.hit_count > 1) badges.push('<span class="badge">命中 ' + r.hit_count + ' 次</span>');
+  if (r.size) badges.push('<span class="badge">' + esc(r.size) + '</span>');
+  if (r.shared_at) badges.push('<span class="badge">' + esc(r.shared_at) + '</span>');
+  (r.sources || []).slice(0, 3).forEach(s => badges.push('<span class="badge">' + esc(s) + '</span>'));
+  const origin = (r.origins || [])[0];
+  return '<div class="title">' + (esc(r.display_title || r.title) || '<span style="color:var(--dim)">（无标题）</span>') + '</div>' +
+    '<div class="badges">' + badges.join('') + '</div>' +
+    '<div class="linkrow">' +
+      '<a class="link" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">' + esc(r.url) + '</a>' +
+      (r.pwd ? '<span class="pwd" title="提取码">' + esc(r.pwd) + '</span>' : '') +
+      '<button type="button" class="mini" data-copy="' + esc(r.copy_text) + '">复制' + (r.pwd ? '链接+提取码' : '链接') + '</button>' +
+      '<a class="mini" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">打开</a>' +
+    '</div>' +
+    (r.note ? '<div class="note">' + esc(r.note) + '</div>' : '') +
+    (origin ? '<div class="note">来源页：<a href="' + esc(origin) + '" target="_blank" rel="noopener noreferrer">' +
+      esc(origin.slice(0, 96)) + '</a></div>' : '');
 }
 
-function render(data, secs, pending = false){
-  const parts = [];
-  parts.push('原始命中 <b>' + data.raw_hits + '</b>');
-  parts.push('去重 <b>' + data.dedup_count + '</b>');
-  if (data.pruned) parts.push('<span style="color:var(--red)">剔除失效 <b>' + data.pruned + '</b></span>');
-  if (data.irrelevant_pruned) parts.push('过滤无关 <b>' + data.irrelevant_pruned + '</b>');
-  if (data.verify_timeout_skipped) parts.push('待校验 <b>' + data.verify_timeout_skipped + '</b>');
-  parts.push('显示 <b>' + data.shown + '</b>');
-  parts.push('存活 <b>' + data.alive_count + '</b>');
-  const vs = data.verify_stats || {};
-  if (vs.checked !== undefined) {
-    parts.push('验活请求 <b>' + (vs.checked || 0) + '</b>（缓存命中 ' + (vs.cache_hit || 0) + '）');
-  }
-  parts.push('耗时 <b>' + secs + 's</b>');
-  parts.push('数据源 <b>' + (data.used_sources || []).join(' + ') + '</b>');
-
-  let html = parts.join(' ｜ ');
-  if (pending) html = '<span class="spinner"></span>已找到部分结果，正在继续检索与校验…<br>' + html;
-
-  if ((data.degraded || []).length) {
-    html = '<span style="color:var(--yellow)">⚠ 召回降级：' +
-      data.degraded.map(esc).join('、') + ' 失败/超时，本次结果可能不全</span><br>' + html;
-  } else if (data.from_cache) {
-    html += '<br><span style="color:var(--dim)">（来自查询缓存，与上一次同词搜索一致）</span>';
-  }
-
-  const qs = data.queries_used || [];
-  if (qs.length > 1) {
-    html += '<br><span style="color:var(--dim)">原始查询召回不足，已自动补搜：' +
-      qs.slice(1).map(esc).join('、') + '</span>';
-  }
-
-  const bs = vs.by_service || {};
-  const names = Object.keys(bs);
-  if (names.length) {
-    html += '<br><span style="color:var(--dim)">按网盘验活：' + names.map(n => {
-      const s = bs[n];
-      return esc(n) + ' <span style="color:var(--green)">' + s.alive + '活</span>/' +
-             '<span style="color:var(--red)">' + s.dead + '死</span>' +
-             (s.other ? '/' + s.other + '其他' : '');
-    }).join(' ｜ ') + '</span>';
-  }
-  if (vs.unsupported) {
-    html += data.strict
-      ? '<br><span style="color:var(--dim)">已按严格模式剔除 ' + vs.unsupported +
-        ' 条不支持验活的网盘（迅雷/UC/123/PikPak/磁力）</span>'
-      : '<br><span style="color:var(--yellow)">⚠ 保留 ' + vs.unsupported +
-        ' 条不支持验活的网盘结果（迅雷/UC/123/PikPak/磁力），它们<strong>未经验证</strong>，' +
-        '可能已失效 —— 勾选「严格剔除」可一并去掉</span>';
-  }
-
-  const errs = Object.entries(data.errors || {});
-  if (errs.length) {
-    html += '<br><span style="color:var(--yellow)">⚠ ' +
-      errs.map(([k, v]) => esc(k) + '：' + esc(String(v).slice(0, 120))).join('<br>⚠ ') + '</span>';
-  }
-  statsEl.innerHTML = html;
-  statsEl.classList.add('show');
-
-  if (!data.results.length){
-    resultsEl.innerHTML = pending
-      ? '<div class="empty"><span class="spinner"></span>正在继续检索' + (data.strict ? '，严格模式等待链接校验完成' : '') + '…</div>'
-      : '<div class="empty">没有找到结果。<br>试试换个关键词，或取消「只看存活」。</div>';
+function renderResults(){
+  const all = last.results || [];
+  const list = activeType ? all.filter(r => r.pan_type === activeType) : all;
+  if (!list.length) {
+    cards.clear();
+    resultsEl.innerHTML = lastPending
+      ? '<div class="empty"><span class="spinner"></span>正在继续检索' + (last.strict ? '，严格模式等待链接校验完成' : '') + '…</div>'
+      : '<div class="empty">' + (activeType && all.length ? '当前网盘类型下没有结果，切到「全部」看看。'
+        : '没有找到结果。<br>试试换个关键词，或取消「只看存活」。') + '</div>';
     return;
   }
-
-  resultsEl.innerHTML = data.results.map(r => {
-    const sc = statusClass(r.status);
-    const badges = [
-      '<span class="badge ' + sc + '">' + esc(r.status_label) + '</span>',
-      '<span class="badge pan">' + esc(r.pan_label) + '</span>'
-    ];
-    if (r.hit_count > 1) badges.push('<span class="badge">命中 ' + r.hit_count + ' 次</span>');
-    if (r.size) badges.push('<span class="badge">' + esc(r.size) + '</span>');
-    if (r.shared_at) badges.push('<span class="badge">' + esc(r.shared_at) + '</span>');
-    (r.sources || []).slice(0, 3).forEach(s => badges.push('<span class="badge">' + esc(s) + '</span>'));
-
-    const origin = (r.origins || [])[0];
-    return '<div class="card' + (r.alive ? '' : ' dead') + '">' +
-      '<div class="card-top"><div class="title">' + (esc(r.display_title || r.title) || '<span style="color:var(--dim)">（无标题）</span>') + '</div></div>' +
-      '<div class="badges">' + badges.join('') + '</div>' +
-      '<div class="linkrow">' +
-        '<a class="link" href="' + esc(r.url) + '" target="_blank" rel="noopener">' + esc(r.url) + '</a>' +
-        (r.pwd ? '<span class="pwd">' + esc(r.pwd) + '</span>' : '') +
-        '<button class="mini" data-copy="' + esc(r.copy_text) + '">复制链接' + (r.pwd ? ' + 提取码' : '') + '</button>' +
-        '<a class="mini" href="' + esc(r.url) + '" target="_blank" rel="noopener">打开</a>' +
-      '</div>' +
-      (r.note ? '<div class="note">' + esc(r.note) + '</div>' : '') +
-      (origin ? '<div class="note">来源页：<a href="' + esc(origin) + '" target="_blank" rel="noopener">' + esc(origin.slice(0, 96)) + '</a></div>' : '') +
-    '</div>';
-  }).join('');
-
-  resultsEl.querySelectorAll('[data-copy]').forEach(btn => {
-    btn.onclick = () => copy(btn.dataset.copy, '链接');
+  const nodes = list.slice(0, shown).map(r => {
+    const sig = [r.status, r.status_label, r.display_title, r.pwd, r.note, r.hit_count, r.sources.length, r.size].join('\u0001');
+    let c = cards.get(r.url);
+    if (!c) {
+      c = {sig: null, el: document.createElement('div')};
+      cards.set(r.url, c);
+    }
+    if (c.sig !== sig) {
+      c.el.className = 'card' + (r.alive ? '' : ' dead');
+      c.el.innerHTML = cardHtml(r);
+      c.sig = sig;
+    }
+    return c.el;
   });
+  const rest = list.length - shown;
+  if (rest > 0) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'morebtn';
+    b.textContent = '显示更多（还有 ' + rest + ' 条' + (last.total > all.length && !activeType ? '，另有 ' + (last.total - all.length) + ' 条低分结果未载入' : '') + '）';
+    nodes.push(b);
+  }
+  resultsEl.replaceChildren(...nodes);
 }
 
-$('#kw').focus();
+if (readUrl()) doSearch(false); else $('#kw').focus();
 </script>
 </body>
 </html>

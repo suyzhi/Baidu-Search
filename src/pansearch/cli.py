@@ -415,7 +415,31 @@ def index_crawl(
         f"[green]完成[/green]：频道 {stats['channels']} 个 ｜ 页面 {stats['pages']} ｜ "
         f"消息 {stats['messages']} 条 ｜ 新增 {stats['new']} 条 ｜ 失败 {stats['errors']} 个"
         + (f" ｜ 频道名归并 {stats['rekeyed']} 处" if stats.get("rekeyed") else "")
+        + (f" ｜ 追平到已有位置 {stats['caught_up']} 个" if stats.get("caught_up") else "")
+        + (f" ｜ 已挖到底跳过 {stats['skipped_exhausted']} 个"
+           if stats.get("skipped_exhausted") else "")
     )
+
+
+@index_app.command("compact")
+def index_compact(
+    vacuum: bool = typer.Option(False, "--vacuum",
+                                help="随后 VACUUM 回收磁盘（需约等于库大小的空闲空间，耗时数分钟）"),
+) -> None:
+    """清空无链接消息的正文（检索不读它们），可选 VACUUM 回收磁盘。
+
+    注意：清空后无法再从这些消息里反查 t.me/xxx 频道提及（频道扩容的候选来源）。
+    """
+    from .tgindex import TgIndex
+
+    index = TgIndex()
+    try:
+        with console.status("[cyan]清理无链接消息正文…[/cyan]"):
+            info = index.compact(vacuum=vacuum)
+    finally:
+        index.close()
+    console.print(f"[green]完成[/green]：清空 {info['cleared']} 条无链接消息的正文"
+                  + ("，已 VACUUM" if info["vacuumed"] else "（未 VACUUM，文件大小暂不变）"))
 
 
 @index_app.command("build-fts")
