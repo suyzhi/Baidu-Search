@@ -15,7 +15,7 @@ import time
 
 import httpx
 
-from .config import errno_default, errno_map, verify_cfg
+from .config import cfg_float, cfg_int, errno_default, errno_map, verify_cfg
 from .models import PanType, Resource, Status, VerifyResult
 from .normalize import strip_leading_one
 from .store import VerifyCache
@@ -34,14 +34,17 @@ class BaiduVerifier:
         self.sv_map = errno_map("share_verify")
         self.su_map = errno_map("shorturlinfo")
         self.default = errno_default()
-        self.timeout = float(self.cfg.get("timeout") or 20)
-        self.retries = max(0, int(self.cfg.get("retries", 2)))
+        # 数值配置统一走 cfg_float/cfg_int：0 是合法值（retries: 0 = 关掉重试），
+        # 不能被 "or 默认值" 吃掉。
+        self.timeout = cfg_float(self.cfg, "timeout", 20)
+        self.retries = max(0, cfg_int(self.cfg, "retries", 2))
         self._owns_cache = cache is None
         self.cache = cache if cache is not None else VerifyCache(
-            ttl_hours=float(self.cfg.get("cache_ttl_hours") or 6)
+            ttl_hours=cfg_float(self.cfg, "cache_ttl_hours", 6)
         )
-        self.limiter = RateLimiter(float(self.cfg.get("rate_limit_qps") or 3.0))
-        self.sem = asyncio.Semaphore(int(self.cfg.get("concurrency") or 4))
+        self.limiter = RateLimiter(cfg_float(self.cfg, "rate_limit_qps", 3.0))
+        # 并发数下限 1：Semaphore(0) 会让所有验活永久挂起
+        self.sem = asyncio.Semaphore(max(1, cfg_int(self.cfg, "concurrency", 4)))
         self._client: httpx.AsyncClient | None = None
         self._warmed = False
         self._warmup_lock = asyncio.Lock()

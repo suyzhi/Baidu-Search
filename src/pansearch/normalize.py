@@ -231,12 +231,28 @@ def strip_leading_one(surl: str) -> str:
     return surl[1:] if surl.startswith("1") and len(surl) > 1 else surl
 
 
+def _strip_magnet_dn(url: str) -> str:
+    """磁力链接只去掉 dn（显示名），保留 tr= 等 tracker 参数。
+
+    原实现是 `url.split("&dn=")[0]`：只要 dn 不在末尾（btsearch 抓到的行里
+    "…&dn=xxx&tr=udp://…" 是常态），dn 后面的所有 tracker 都会被一起截掉。
+    展示上看不出问题，但"复制链接"拿去下载时会丢掉一批能加速连接的节点。
+    只删 dn 是因为它按来源各不相同（同一资源在不同站点的 dn 不一样），
+    而 tracker 是**可用性**信息，不属于归一化该抹平的差异。
+    """
+    prefix, sep, query = url.partition("?")
+    if not sep:
+        return url
+    kept = [p for p in query.split("&") if p and not p.lower().startswith("dn=")]
+    return f"{prefix}?{'&'.join(kept)}" if kept else prefix
+
+
 def normalize_url(pan_type: PanType, url: str, surl: str | None, pwd: str | None) -> str:
     """归一化出用于展示/去重的标准链接。"""
     if pan_type is PanType.BAIDU and surl:
         return f"https://pan.baidu.com/s/{surl}"
     if pan_type is PanType.MAGNET:
-        return url.split("&dn=")[0]
+        return _strip_magnet_dn(url)
     parsed = safe_urlsplit(url)
     if parsed.scheme and parsed.netloc:
         # 去掉跟踪参数，保留路径

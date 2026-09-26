@@ -12,6 +12,7 @@ import asyncio
 
 import httpx
 
+from ..config import cfg_bool, cfg_float, cfg_int
 from ..extract import _parse_time, excerpt
 from ..models import RawHit
 from ..normalize import URL_RE, pwd_from_url
@@ -33,14 +34,14 @@ class TelegramAdapter(Adapter):
     def _lookup(self, kw):
         index = TgIndex(self.cfg.get("index_path") or None)
         try:
-            return index.search(kw, limit=int(self.cfg.get("max_hits") or 400)), index.is_empty()
+            return index.search(kw, limit=max(1, cfg_int(self.cfg, "max_hits", 400))), index.is_empty()
         finally:
             index.close()
 
     @property
     def auto_index(self) -> bool:
         """索引为空时自动抓一轮最新消息，避免首次使用没有结果。"""
-        return bool(self.cfg.get("auto_index", True))
+        return cfg_bool(self.cfg, "auto_index", True)
 
     async def search(self, kw: str, client: httpx.AsyncClient) -> list[RawHit]:
         rows, empty = await asyncio.to_thread(self._lookup, kw)
@@ -59,8 +60,8 @@ class TelegramAdapter(Adapter):
                 channels = load_channels(self.cfg.get("channels_file") or None)
                 if channels:
                     crawler = TgCrawler(
-                        concurrency=int(self.cfg.get("crawl_concurrency") or 12),
-                        timeout=float(self.cfg.get("timeout") or 20),
+                        concurrency=max(1, cfg_int(self.cfg, "crawl_concurrency", 12)),
+                        timeout=cfg_float(self.cfg, "timeout", 20),
                         index=index,
                     )
                     await crawler.crawl(channels, pages=1)

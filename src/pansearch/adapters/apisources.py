@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from ..config import CONFIG_DIR
+from ..config import CONFIG_DIR, cfg_float
 from ..models import RawHit
 from ..routing import classify
 from .base import Adapter, publish_hits, register
@@ -254,7 +254,7 @@ class ApiSourcesAdapter(Adapter):
 
         # 限流：arXiv 明确要求每次请求间隔 ≥3 秒，连发会被 429。
         # 实测被限流时那一发要等 16 秒还返回 0 条 —— 既慢又白等。
-        interval = float(api.get("min_interval") or 0)
+        interval = cfg_float(api, "min_interval", 0.0)
         if interval > 0:
             async with self._rate_lock(name):
                 wait = interval - (time.monotonic() - self._last_call.get(name, 0.0))
@@ -274,11 +274,11 @@ class ApiSourcesAdapter(Adapter):
                 payload = str(api.get("body") or "{}").replace("{q}", kw)
                 headers.setdefault("Content-Type", "application/json")
                 resp = await client.post(url, content=payload.encode("utf-8"),
-                                         timeout=float(api.get("timeout") or 15),
+                                         timeout=cfg_float(api, "timeout", 15),
                                          headers=headers)
             else:
                 resp = await client.get(
-                    url, timeout=float(api.get("timeout") or 15), headers=headers,
+                    url, timeout=cfg_float(api, "timeout", 15), headers=headers,
                 )
         except httpx.HTTPError:
             return []

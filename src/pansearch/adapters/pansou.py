@@ -16,6 +16,7 @@ import time
 
 import httpx
 
+from ..config import cfg_float, cfg_int
 from ..extract import _parse_time
 from ..models import PanType, RawHit
 from ..normalize import detect_pan_type, pwd_from_url
@@ -70,8 +71,8 @@ class PansouAdapter(Adapter):
         return [u.rstrip("/") for u in (self.cfg.get("instances") or DEFAULT_INSTANCES)]
 
     async def _query(self, client: httpx.AsyncClient, url: str, kw: str) -> dict | None:
-        retries = max(0, int(self.cfg.get("retries", 2)))
-        timeout = float(self.cfg.get("timeout") or 15)
+        retries = max(0, cfg_int(self.cfg, "retries", 2))
+        timeout = cfg_float(self.cfg, "timeout", 15)
         last_err: str | None = None
         for attempt in range(retries + 1):
             try:
@@ -99,9 +100,10 @@ class PansouAdapter(Adapter):
 
     async def search(self, kw: str, client: httpx.AsyncClient) -> list[RawHit]:
         instances = _healthy_first(self.instances)
-        deadline = float(self.cfg.get("deadline") or 15)
+        deadline = cfg_float(self.cfg, "deadline", 15)
         end = time.monotonic() + deadline * 0.95
-        delay = max(0.0, float(self.cfg.get("failover_delay", min(3.0, deadline / 3))))
+        # failover_delay 显式写 null 时原来会崩在 float(None) 上，这里一并兜住
+        delay = max(0.0, cfg_float(self.cfg, "failover_delay", min(3.0, deadline / 3)))
         pending = {}
         errors = []
         next_instance = 0

@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timezone
 from functools import lru_cache
 
-from .config import pan_priority, scoring_cfg
+from .config import cfg_float, pan_priority, scoring_cfg
 from .models import PanType, Resource, Status
 from .query import matching_text, normalize_text, query_info, query_terms, subject_terms, term_present
 from .textindex import term_idf
@@ -141,7 +141,7 @@ def _freshness(res: Resource, cfg: dict) -> float:
     # 缺数据不等于不新鲜。
     if not res.shared_at:
         return 1.0
-    halflife = float(cfg.get("freshness_halflife_days") or 730)
+    halflife = cfg_float(cfg, "freshness_halflife_days", 730)
     when = res.shared_at
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
@@ -165,18 +165,18 @@ def score_resource(res: Resource, kw: str, cfg: dict | None = None, *,
     cfg = cfg or scoring_cfg()
 
     rel = _relevance(res, kw) if relevance_value is None else relevance_value
-    relevance = rel ** float(cfg.get("relevance_power") or 1.0)
+    relevance = rel ** cfg_float(cfg, "relevance_power", 1.0)
     score = relevance * _kind_weight(res, cfg) * _freshness(res, cfg)
 
     # 多源命中加成（相对提升，封顶 35%）
-    bonus = float(cfg.get("multi_source_bonus") or 0.0)
+    bonus = cfg_float(cfg, "multi_source_bonus", 0.0)
     source_count = len(set(res.sources))
     if source_count > 1:
         score *= 1.0 + min(0.35, (source_count - 1) * bonus)
 
     # RRF（Reciprocal Rank Fusion）多源融合：Σ 1/(60+rank)。
     # 比"命中次数"更细 —— 在 TG 的 BM25 序和站点/网页序里都排前面的资源更可信。
-    rrf_bonus = float(cfg.get("rrf_bonus") or 0.0)
+    rrf_bonus = cfg_float(cfg, "rrf_bonus", 0.0)
     if rrf_bonus > 0 and res.rrf:
         score *= 1.0 + min(0.30, rrf_bonus * res.rrf)
 
@@ -185,7 +185,7 @@ def score_resource(res: Resource, kw: str, cfg: dict | None = None, *,
     # 百度链接光靠域名就能压过已验证可用的夸克链接，实测表现为
     # 「漂流少年」前排全是不对版的百度结果、真资源在夸克却排在后面。
     if res.pan_type is PanType.BAIDU and res.usable:
-        score *= 1.0 + float(cfg.get("pan_priority_bonus") or 0.0)
+        score *= 1.0 + cfg_float(cfg, "pan_priority_bonus", 0.0)
 
     # 有提取码 = 可直接用 —— 但只在**链接确实可确认可用**时才算优势。
     # 否则一堆"提取码还没验证过"的百度链接会靠这个加成压过确认可用的夸克链接。
@@ -194,7 +194,10 @@ def score_resource(res: Resource, kw: str, cfg: dict | None = None, *,
 
     # 只被"放宽查询"命中的结果降权（保留可发现性，但不淹没主查询结果）
     if not res.from_primary and rel < 0.85:
-        score *= float(cfg.get("relaxed_penalty") or 0.5)
+        # 走 cfg_float 而不是 "or 0.5"：0 是**合法配置**（补搜结果直接归零、彻底垫底），
+        # 写成 or 会把它悄悄换回 0.5，用户改了配置却毫无效果也不报错。
+        penalty = cfg_float(cfg, "relaxed_penalty", 0.5)
+        score *= max(0.0, penalty)
 
     return round(score * _status_weight(res, cfg), 6)
 

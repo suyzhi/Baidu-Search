@@ -29,6 +29,7 @@ import urllib.parse
 
 import httpx
 
+from ..config import cfg_float, cfg_int
 from ..extract import extract_from_text
 from ..models import RawHit
 from ..query import query_terms
@@ -146,12 +147,15 @@ class BtSearchAdapter(Adapter):
     def __init__(self, cfg: dict | None = None):
         super().__init__(cfg)
         self.sites = list(self.cfg.get("sites") or DEFAULT_SITES)
-        self.concurrency = int(self.cfg.get("concurrency") or 3)
-        self.page_timeout = float(self.cfg.get("page_timeout") or 12)
-        self.page_concurrency = int(self.cfg.get("page_concurrency") or 4)
-        self.max_sites = int(self.cfg.get("max_sites") or 6)
-        self.retries = int(self.cfg.get("retries") or 1)
-        self.limiter = RateLimiter(float(self.cfg.get("rate_limit_qps") or 1.5))
+        # 并发数下限 1：Semaphore(0) 会让整个源永久挂起
+        self.concurrency = max(1, cfg_int(self.cfg, "concurrency", 3))
+        self.page_timeout = cfg_float(self.cfg, "page_timeout", 12)
+        self.page_concurrency = max(1, cfg_int(self.cfg, "page_concurrency", 4))
+        self.max_sites = cfg_int(self.cfg, "max_sites", 6)
+        # retries: 0 是 sources.yaml 里**真的写着**的值（"不重试：nyaa 的 504 重试会让
+        # 单站从 12s 变成 24s"），原来写成 cfg.get("retries") or 1，于是那句配置一直是假的。
+        self.retries = max(0, cfg_int(self.cfg, "retries", 1))
+        self.limiter = RateLimiter(cfg_float(self.cfg, "rate_limit_qps", 1.5))
         self.sem = asyncio.Semaphore(self.concurrency)
         self.page_sem = asyncio.Semaphore(self.page_concurrency)
         self.last_selected: list[str] = []
@@ -231,7 +235,7 @@ class BtSearchAdapter(Adapter):
         # 第二阶段（只有配了 detail_re 的站需要）
         detail_re = site.get("detail_re")
         if detail_re:
-            pages = self._detail_pages(resp.text, detail_re)[: int(site.get("max_pages") or 4)]
+            pages = self._detail_pages(resp.text, detail_re)[: max(0, cfg_int(site, "max_pages", 4))]
             if pages:
                 deep = await asyncio.gather(
                     *(self._one_page(p, name, kw, client) for p in pages), return_exceptions=True)

@@ -35,6 +35,7 @@ import urllib.parse
 
 import httpx
 
+from ..config import cfg_bool, cfg_float, cfg_int
 from ..extract import extract_from_text
 from ..models import RawHit
 from ..query import query_terms
@@ -135,17 +136,18 @@ class BilibiliAdapter(Adapter):
 
     def __init__(self, cfg: dict | None = None):
         super().__init__(cfg)
-        self.search_pages = int(self.cfg.get("search_pages") or 1)
-        self.page_size = int(self.cfg.get("page_size") or 20)
-        self.max_videos = int(self.cfg.get("max_videos") or 10)
-        self.max_articles = int(self.cfg.get("max_articles") or 6)
-        self.comment_pages = int(self.cfg.get("comment_pages") or 1)
-        self.comment_size = int(self.cfg.get("comment_size") or 20)
-        self.concurrency = int(self.cfg.get("concurrency") or 5)
+        self.search_pages = max(0, cfg_int(self.cfg, "search_pages", 1))
+        self.page_size = max(1, cfg_int(self.cfg, "page_size", 20))
+        self.max_videos = max(0, cfg_int(self.cfg, "max_videos", 10))
+        self.max_articles = max(0, cfg_int(self.cfg, "max_articles", 6))
+        self.comment_pages = max(0, cfg_int(self.cfg, "comment_pages", 1))
+        self.comment_size = max(1, cfg_int(self.cfg, "comment_size", 20))
+        # 并发数下限 1：Semaphore(0) 会让搜索永久挂起
+        self.concurrency = max(1, cfg_int(self.cfg, "concurrency", 5))
         self.templates = list(self.cfg.get("templates") or DEFAULT_TEMPLATES)
-        self.qps = float(self.cfg.get("rate_limit_qps") or 4.0)
-        self.include_comments = bool(self.cfg.get("comments", True))
-        self.include_articles = bool(self.cfg.get("articles", True))
+        self.qps = cfg_float(self.cfg, "rate_limit_qps", 4.0)
+        self.include_comments = cfg_bool(self.cfg, "comments", True)
+        self.include_articles = cfg_bool(self.cfg, "articles", True)
         self.limiter = RateLimiter(self.qps)
         self.sem = asyncio.Semaphore(self.concurrency)
         self.signer = _WBISigner()

@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from ..config import cfg_bool, cfg_float, cfg_int
 from ..extract import extract_from_text, html_to_text
 from ..models import RawHit
 from ..normalize import URL_RE
@@ -109,13 +110,13 @@ class WebSearchAdapter(Adapter):
 
     def __init__(self, cfg: dict | None = None):
         super().__init__(cfg)
-        qps = float(self.cfg.get("rate_limit_qps") or 0.5)
+        qps = cfg_float(self.cfg, "rate_limit_qps", 0.5)
         self.limiters = {name: RateLimiter(qps) for name in self.engines}
-        self.sem = asyncio.Semaphore(int(self.cfg.get("concurrency") or 2))
-        self.fetch_pages = bool(self.cfg.get("fetch_result_pages", True))
-        self.max_pages = int(self.cfg.get("max_pages") or 6)
-        self.page_timeout = float(self.cfg.get("page_timeout") or 12)
-        self.page_sem = asyncio.Semaphore(int(self.cfg.get("page_concurrency") or 4))
+        self.sem = asyncio.Semaphore(max(1, cfg_int(self.cfg, "concurrency", 2)))
+        self.fetch_pages = cfg_bool(self.cfg, "fetch_result_pages", True)
+        self.max_pages = max(0, cfg_int(self.cfg, "max_pages", 6))
+        self.page_timeout = cfg_float(self.cfg, "page_timeout", 12)
+        self.page_sem = asyncio.Semaphore(max(1, cfg_int(self.cfg, "page_concurrency", 4)))
         # 被限流的引擎在本轮搜索内直接跳过，避免无谓等待
         self._cooled: set[str] = set()
 

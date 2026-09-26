@@ -181,9 +181,9 @@ async def run_maintenance(
         # ---- ② 复验过期链接（把"等用户搜到才验"变成"主动巡检"）----
         if verify_limit > 0 and not skip_verify:
             t0 = time.monotonic()
-            from .config import verify_cfg
+            from .config import verify_ttl_hours
 
-            ttl = float(verify_cfg().get("cache_ttl_hours") or 6)
+            ttl = verify_ttl_hours()
             cache = VerifyCache(ttl_hours=ttl)
             try:
                 before_pending = cache.pending_count(ttl)

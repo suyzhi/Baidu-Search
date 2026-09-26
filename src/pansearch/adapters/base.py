@@ -7,6 +7,7 @@ from contextvars import ContextVar
 
 import httpx
 
+from ..config import cfg_bool, cfg_float
 from ..models import RawHit
 
 REGISTRY: dict[str, type["Adapter"]] = {}
@@ -42,11 +43,12 @@ class Adapter(ABC):
 
     @property
     def enabled(self) -> bool:
-        return bool(self.cfg.get("enabled", True))
+        return cfg_bool(self.cfg, "enabled", True)
 
     @property
     def weight(self) -> float:
-        return float(self.cfg.get("weight") or 0.6)
+        # weight: 0 是合法配置（想让某个源的结果彻底沉底）
+        return cfg_float(self.cfg, "weight", 0.6)
 
     @abstractmethod
     async def search(self, kw: str, client: httpx.AsyncClient) -> list[RawHit]:

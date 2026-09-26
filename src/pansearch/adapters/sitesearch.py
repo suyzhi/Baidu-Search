@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from ..config import cfg_bool, cfg_float, cfg_int
 from ..extract import extract_from_text, html_to_text, page_title
 from ..models import RawHit
 from ..query import query_terms
@@ -95,12 +96,12 @@ class SiteSearchAdapter(Adapter):
 
     def __init__(self, cfg: dict | None = None):
         super().__init__(cfg)
-        self.max_pages = int(self.cfg.get("max_pages") or 6)
-        self.page_timeout = float(self.cfg.get("page_timeout") or 12)
-        self.page_sem = asyncio.Semaphore(int(self.cfg.get("page_concurrency") or 6))
-        self.site_sem = asyncio.Semaphore(int(self.cfg.get("concurrency") or 3))
-        self.max_sites = int(self.cfg.get("max_sites") or 12)
-        self._health = SiteHealth() if self.cfg.get("health_tracking", True) else None
+        self.max_pages = max(0, cfg_int(self.cfg, "max_pages", 6))
+        self.page_timeout = cfg_float(self.cfg, "page_timeout", 12)
+        self.page_sem = asyncio.Semaphore(max(1, cfg_int(self.cfg, "page_concurrency", 6)))
+        self.site_sem = asyncio.Semaphore(max(1, cfg_int(self.cfg, "concurrency", 3)))
+        self.max_sites = cfg_int(self.cfg, "max_sites", 12)
+        self._health = SiteHealth() if cfg_bool(self.cfg, "health_tracking", True) else None
         # 最近一次实际使用的站点，便于排查
         self.last_selected: list[str] = []
 
@@ -254,7 +255,7 @@ class SiteSearchAdapter(Adapter):
         # 而相关性闸门通常会淘汰掉大半候选。
         out: list[RawHit] = []
         kept = 0
-        chunk = max(1, int(self.cfg.get("page_concurrency") or 6))
+        chunk = max(1, cfg_int(self.cfg, "page_concurrency", 6))
         for i in range(0, len(candidates), chunk):
             batch = candidates[i:i + chunk]
             results = await asyncio.gather(*(one(p) for p in batch), return_exceptions=True)
