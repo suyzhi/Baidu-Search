@@ -62,6 +62,9 @@ docker volume create pansou-cache >/dev/null
 #     整整缓存 15 分钟 —— 插件后台合并只写插件缓存、不改写响应缓存，表现为某个插件的
 #     结果"凭空消失"（实测 rrbt 对 Omnisphere 的 10 条百度链）。缩到 5 分钟后可自愈。
 #   · ASYNC_MAX_BACKGROUND_WORKERS 40→80：插件数 68→108 之后，40 个 worker 冷查询跑不完。
+#   · ASYNC_RESPONSE_TIMEOUT 8s：4s 会让"慢一点的插件"（多数百度类）整批掉出响应
+#     （实测 Omnisphere 只剩 12 条），10s 又让每次冷查询都要等满 10s。
+#   （注释不能写在下面的续行中间：会截断 docker run，报 "requires at least 1 argument"）
 docker run -d --name pansou --restart unless-stopped \
   -p "${PORT}:8888" \
   -v pansou-cache:/app/cache \
@@ -71,8 +74,6 @@ docker run -d --name pansou --restart unless-stopped \
   -e ENABLED_PLUGINS="$PLUGINS" \
   -e CACHE_ENABLED=true -e CACHE_TTL=300 \
   -e ASYNC_PLUGIN_ENABLED=true \
-  # 8s：4s 会让"慢一点的插件"（多数百度类）整批掉出响应（实测 Omnisphere 只剩 12 条），
-  # 10s 又让每次冷查询都要等满 10s；8s 是实测下来"拿得全 + 别太慢"的折中。
   -e ASYNC_RESPONSE_TIMEOUT="${PANSOU_ASYNC_TIMEOUT:-8}" \
   -e ASYNC_CACHE_TTL_HOURS=6 \
   -e ASYNC_MAX_BACKGROUND_WORKERS=80 \

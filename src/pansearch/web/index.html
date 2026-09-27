@@ -58,12 +58,15 @@
   label.toggle{display:flex;align-items:center;gap:6px;color:var(--dim);font-size:13px;cursor:pointer}
 
   .sources{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
-  .src{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:2px 9px;border-radius:999px;
+  /* 状态类名带 s- 前缀：裸的 .empty 会撞上结果区的 .empty{padding:50px 0}，
+     把圆点撑成竖椭圆、连带整排胶囊变成大圆（09-27 实测） */
+  .src{display:inline-flex;align-items:center;gap:6px;height:24px;line-height:1;font-size:12px;
+    padding:0 9px;border-radius:999px;white-space:nowrap;
     border:1px solid var(--border);background:var(--panel);color:var(--dim);font-variant-numeric:tabular-nums}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim)}
-  .dot.ok{background:var(--green)} .dot.empty{background:var(--border)}
-  .dot.degraded{background:var(--yellow)} .dot.timeout,.dot.error{background:var(--red)}
-  .dot.run{background:var(--accent);animation:pulse 1s ease-in-out infinite}
+  .dot{flex:none;width:8px;height:8px;padding:0;border-radius:50%;background:var(--dim)}
+  .dot.s-ok{background:var(--green)} .dot.s-empty{background:var(--border)}
+  .dot.s-degraded{background:var(--yellow)} .dot.s-timeout,.dot.s-error{background:var(--red)}
+  .dot.s-run{background:var(--accent);animation:pulse 1s ease-in-out infinite}
   @keyframes pulse{50%{opacity:.3}}
 
   .summary{font-size:13px;color:var(--dim);margin-bottom:14px}
@@ -317,7 +320,7 @@ function renderSources(){
     const r = rep[n];
     const cls = r ? r.status : (lastPending ? 'run' : 'empty');
     const tip = r ? (STATUS_TEXT[r.status] || r.status) + (r.error ? '：' + r.error : '') : '检索中';
-    return '<span class="src" title="' + esc(tip) + '"><span class="dot ' + esc(cls) + '"></span>' +
+    return '<span class="src" title="' + esc(tip) + '"><span class="dot s-' + esc(cls) + '"></span>' +
       esc(SOURCE_LABELS[n] || n) + (r ? ' ' + r.hits + ' · ' + r.seconds + 's' : '') + '</span>';
   }).join('');
 }
