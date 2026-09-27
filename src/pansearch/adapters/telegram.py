@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 import httpx
 
@@ -16,8 +17,34 @@ from ..config import cfg_bool, cfg_float, cfg_int
 from ..extract import _parse_time, excerpt
 from ..models import RawHit
 from ..normalize import URL_RE, pwd_from_url
+from ..query import matching_text
 from ..tgindex import TgCrawler, TgIndex, load_channels
 from .base import Adapter, register
+
+
+# 链接前文里常见、但不说明"这是什么资源"的词
+_FILLER_WORDS = re.compile(
+    # 「提取码: abcd」连同码值一起去掉，码值不是标题内容
+    r"(?:提取码|密码|访问码|(?<![a-z])(?:pwd|code))\s*[:：=]?\s*[a-z0-9]{4,6}(?![a-z0-9])|"
+    r"百度网盘|百度云|百度|夸克网盘|夸克|阿里云盘|阿里|迅雷云盘|迅雷|天翼云盘|天翼|移动云盘|"
+    r"123云盘|123网盘|115网盘|uc网盘|磁力链接|磁力|网盘|链接|地址|下载|提取码|"
+    r"密码|访问码|分享|资源|备用|点击|打开|复制|"
+    # 英文词要有词边界：不能把 Xcode、Lucky 拆成 x、lcky
+    r"(?<![a-z])(?:uc|pikpak|pwd|code|link|download)(?![a-z])"
+)
+
+
+def _is_filler(segment: str) -> bool:
+    """链接前文只有提取码/网盘名这类填充时，不能当标题。
+
+    合集帖里常见「夸克 https://… UC https://…」「…?pwd=8888 https://…」：
+    前文取出来是「夸克」「?pwd=8888」，打分时被当成"无标题"保守保留，
+    TG 检索上限放到 1000 后这类条目挤进了前 20（「龙珠 完全版 漫画」14/20）。
+    返回 True 时调用方回退到围绕查询词的消息摘要。
+    """
+    rest = _FILLER_WORDS.sub(" ", matching_text(segment))
+    rest = re.sub(r"[\W_\d]+", "", rest)       # 标点、emoji、纯数字
+    return len(rest) < 2
 
 
 @register
@@ -89,7 +116,7 @@ class TelegramAdapter(Adapter):
         for m in URL_RE.finditer(text, 0, pos):
             prev_end = m.end()
         segment = text[prev_end:pos].strip(" \t\n:：-—|｜·,，、")
-        if not segment:
+        if not segment or _is_filler(segment):
             return None
         return excerpt(segment, kw, width) or None
 

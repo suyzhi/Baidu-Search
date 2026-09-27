@@ -91,7 +91,8 @@ sources:
     kind: tg
     weight: 0.9
     auto_index: true          # 整个索引为空时才抓最新一页；关键词无命中不触发
-    max_hits: 400             # 每次检索最多取多少条消息
+    max_hits: 400             # 每次检索最多取多少条消息。试过 1000：前 20 名不变、网页只载入 300 条，
+                              # 多出的结果看不到，本地计算量却大四成（见 README 覆盖率实测）
     crawl_concurrency: 12
     timeout: 20
     channels_file: null       # 默认 config/tg_channels.txt

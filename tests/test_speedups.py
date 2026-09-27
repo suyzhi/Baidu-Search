@@ -321,6 +321,28 @@ async def test_pipeline_prefetches_while_slow_source_runs(monkeypatch):
     assert out.resources
 
 
+# ---------------------------------------------------------------- TG 标题
+@pytest.mark.parametrize("segment,filler", [
+    ("?pwd=8888", True), ("夸克", True), ("UC", True), ("?pwd=6742 夸克", True),
+    ("百度网盘 提取码: abcd", True), ("🔗 下载地址", True), ("115", True),
+    ("Xcode 15", False), ("Lucky", False), ("沙丘2", False), ("沙丘2 提取码 abcd", False),
+])
+def test_filler_segments_are_not_titles(segment, filler):
+    from pansearch.adapters.telegram import _is_filler
+
+    assert _is_filler(segment) is filler
+
+
+def test_digest_link_with_only_pan_name_falls_back_to_excerpt():
+    """「龙珠 完全版 漫画」：前文只有「UC」「?pwd=8888」的链接曾以此为标题挤进前 20。"""
+    from pansearch.adapters.telegram import TelegramAdapter
+
+    text = "龙珠完全版漫画 全42卷 夸克 https://pan.quark.cn/s/aaa0000001 UC https://drive.uc.cn/s/bbb0000001"
+    hits = TelegramAdapter._to_hits([{"channel": "c", "msg_id": 1, "text": text,
+                                      "links": [{"url": "https://drive.uc.cn/s/bbb0000001"}]}], "龙珠")
+    assert "龙珠" in hits[0].title
+
+
 # ---------------------------------------------------------------- Web 序列化
 def test_serialize_reports_type_counts_over_all_results():
     from pansearch.webapp import _serialize
