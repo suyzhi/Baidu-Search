@@ -70,6 +70,15 @@ TG 索引从 62.8 万条长到 **473 万条 / 10 GB** 后，下面那张 09-13 �
 
 ## 快速开始
 
+**最省事：在 Finder 里双击 `启动 pansearch.command`。** 它会依次：
+- 首次运行时自动装好依赖（需要 `uv`）；
+- 拉起 colima 和 PanSou、SearXNG 容器：已在跑就跳过，停了就启动，不存在才创建；
+- 启动网页并打开浏览器。
+
+关掉那个终端窗口就停止网页服务，容器留在后台，下次打开很快。网页已经在跑时再双击，只会打开浏览器。Docker 不可用时，PanSou 自动降级到公共实例，照样能用。日志在 `.cache/launcher.log`。
+
+手动方式：
+
 ```bash
 cd pan-sousuo
 uv venv && uv pip install -e ".[web,dev]"
