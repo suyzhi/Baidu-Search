@@ -17,7 +17,7 @@ import pytest
 from pansearch import maintain
 from pansearch.dedupe import build_resources
 from pansearch.models import RawHit, Status, VerifyResult
-from pansearch.store import VerifyCache
+from pansearch.store import CACHE_VERSION, VerifyCache
 from pansearch.verify import BaiduVerifier
 
 
@@ -145,6 +145,51 @@ def test_stale_resources_respects_limit(tmp_path):
     ])
     _, picked = maintain.stale_resources(cache, older_than_hours=6, limit=3)
     assert len(picked) == 3
+    cache.close()
+
+
+def test_young_dead_rows_do_not_clog_recheck_window(tmp_path):
+    """回归：没到重验时间的死链不能占住"最老的 N 行"窗口。
+
+    以前 stale() 先取最老的 3×limit 行，再在 Python 里丢掉年轻死链；这些行永远不会
+    被重验、checked_at 永远不变，一直排在 ORDER BY checked_at ASC 的最前面 ——
+    攒够 3×limit 条之后，每轮复验 0 条。
+    """
+    limit = 3
+    cache = make_cache(tmp_path, [
+        # 比所有活链都老、但还没到 dead_retry_days 的死链，数量远超 3×limit
+        *[(f"1DEAD{i:03d}", None, "dead" if i % 2 else "not_found", 24 * 10 + i)
+          for i in range(limit * 5)],
+        ("1LONGDEAD", None, "dead", 24 * 40),          # 超过 dead_retry_days：该重验
+        ("1ALIVE01", "abcd", "alive", 8),
+        ("quark:pan.quark.cn/s/alive02", None, "alive", 7),
+        ("1FRESH01", None, "alive", 1),                # 还没过期
+    ])
+    resources, picked = maintain.stale_resources(cache, older_than_hours=6, limit=limit,
+                                                 dead_retry_days=30)
+    assert [p["key"] for p in picked] == [
+        "baidu:1LONGDEAD", "baidu:1ALIVE01", "quark:pan.quark.cn/s/alive02",
+    ]
+    assert len(resources) == 3
+    cache.close()
+
+
+def test_old_cache_version_rows_do_not_clog_recheck_window(tmp_path):
+    """旧 CACHE_VERSION 前缀 / 无前缀的行不会再被 put 刷新，不能进复验队列。"""
+    limit = 3
+    cache = make_cache(tmp_path, [
+        ("1ALIVE01", None, "alive", 8),
+        ("1ALIVE02", None, "alive", 7),
+    ])
+    old = time.time() - 24 * 20 * 3600
+    cache.conn.executemany(
+        "INSERT INTO verify_cache (surl, status, checked_at) VALUES (?, 'alive', ?)",
+        [(f"v{CACHE_VERSION - 1}|1OLDVER{i:02d}|", old - i) for i in range(limit * 5)]
+        + [("no-version-prefix", old)],
+    )
+    cache.conn.commit()
+    _, picked = maintain.stale_resources(cache, older_than_hours=6, limit=limit)
+    assert [p["key"] for p in picked] == ["baidu:1ALIVE01", "baidu:1ALIVE02"]
     cache.close()
 
 

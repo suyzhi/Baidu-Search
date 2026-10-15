@@ -130,15 +130,15 @@ def stale_resources(cache: VerifyCache, *, older_than_hours: float, limit: int,
 
     死链不会复活，反复验它们是纯浪费预算。超过 dead_retry_days 再验一次，
     是为了覆盖"分享者重新上传"这种小概率情况。
+    这个跳过交给 store.stale 在 SQL 里做：在这里丢掉的死链永远不会被刷新，
+    会一直占着"最老的 N 行"窗口，攒够之后每轮复验 0 条。
     """
     now = now or time.time()
-    entries = cache.stale(older_than_hours=older_than_hours, limit=max(limit * 3, limit))
+    entries = cache.stale(older_than_hours=older_than_hours, limit=max(limit * 3, limit),
+                          dead_older_than_hours=dead_retry_days * 24)
     picked: list[dict] = []
     hits: list[RawHit] = []
     for entry in entries:
-        status = str(entry.get("status") or "")
-        if status in ("dead", "not_found") and entry.get("age_hours", 0) < dead_retry_days * 24:
-            continue
         entry["key"] = cache_key_to_resource_key(entry.get("key"))
         url = rebuild_url(entry["key"])
         if not url:
