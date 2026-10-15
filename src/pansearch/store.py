@@ -161,8 +161,9 @@ class VerifyCache:
         也就是说一个关键词可能半年没人搜过，它下面的链接就半年没被复核过。
         定时任务按"最久没验的先验"把队列推平，而不是靠用户偶然搜到。
 
-        返回 [{key, pwd, status, checked_at, age_hours}]；key 是资源键
-        （baidu:1AbC / quark:pan.quark.cn/s/xxx），复验时用它重建 Resource。
+        返回 [{key, pwd, status, checked_at, age_hours}]；key 是写缓存时用的键：
+        百度是裸 surl（1AbCdEf），其它网盘是资源键（quark:pan.quark.cn/s/xxx）。
+        复验时先用 maintain.cache_key_to_resource_key 还原成资源键再重建 Resource。
         """
         cutoff = time.time() - older_than_hours * 3600
         rows = self.conn.execute(
