@@ -75,7 +75,7 @@ def test_second_writer_waits_instead_of_failing(tmp_path):
 def test_stale_still_parses_keys_and_skips_garbage(tmp_path):
     """删掉 stale() 里那两行死代码之后，键解析行为必须和以前完全一致。"""
     cache = VerifyCache(tmp_path / "c.sqlite3", ttl_hours=0)
-    cache.put("baidu:1AbCdEf", VerifyResult(status=Status.ALIVE), pwd="1234")
+    cache.put("1AbCdEf", VerifyResult(status=Status.ALIVE), pwd="1234")   # 百度：裸 surl
     cache.put("magnet:?xt=urn:btih:AAAA", VerifyResult(status=Status.ALIVE))
     cache.conn.execute(
         "INSERT OR REPLACE INTO verify_cache (surl, status, checked_at)"
@@ -84,7 +84,7 @@ def test_stale_still_parses_keys_and_skips_garbage(tmp_path):
     cache.conn.commit()
 
     entries = {e["key"]: e for e in cache.stale(older_than_hours=0)}
-    assert entries["baidu:1AbCdEf"]["pwd"] == "1234"
+    assert entries["1AbCdEf"]["pwd"] == "1234"
     assert entries["magnet:?xt=urn:btih:AAAA"]["pwd"] is None
     assert "no-version-prefix" not in entries, "拆不出两段的旧键应跳过，而不是崩掉"
     cache.close()

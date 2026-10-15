@@ -50,6 +50,20 @@ def rebuild_url(key: str) -> str | None:
     return f"https://{rest}"
 
 
+def cache_key_to_resource_key(key: str | None) -> str:
+    """把验活缓存里的键还原成资源键。
+
+    百度验活（verify.BaiduVerifier）按**裸 surl** 写缓存（v2|1AbCdEf|pwd），
+    其它网盘才按资源键写（v2|quark:pan.quark.cn/s/xxx|）。百度 surl 只含
+    [A-Za-z0-9_-]，不可能带 ":"，所以不带冒号的键一律补回 baidu: 前缀 ——
+    否则 rebuild_url 拆不出网盘类型，百度链接永远进不了复验队列。
+    """
+    key = str(key or "")
+    if key and ":" not in key:
+        return f"{PanType.BAIDU.value}:{key}"
+    return key
+
+
 @dataclass
 class MaintainReport:
     started_at: str = ""
@@ -116,16 +130,17 @@ def stale_resources(cache: VerifyCache, *, older_than_hours: float, limit: int,
 
     死链不会复活，反复验它们是纯浪费预算。超过 dead_retry_days 再验一次，
     是为了覆盖"分享者重新上传"这种小概率情况。
+    这个跳过交给 store.stale 在 SQL 里做：在这里丢掉的死链永远不会被刷新，
+    会一直占着"最老的 N 行"窗口，攒够之后每轮复验 0 条。
     """
     now = now or time.time()
-    entries = cache.stale(older_than_hours=older_than_hours, limit=max(limit * 3, limit))
+    entries = cache.stale(older_than_hours=older_than_hours, limit=max(limit * 3, limit),
+                          dead_older_than_hours=dead_retry_days * 24)
     picked: list[dict] = []
     hits: list[RawHit] = []
     for entry in entries:
-        status = str(entry.get("status") or "")
-        if status in ("dead", "not_found") and entry.get("age_hours", 0) < dead_retry_days * 24:
-            continue
-        url = rebuild_url(entry.get("key"))
+        entry["key"] = cache_key_to_resource_key(entry.get("key"))
+        url = rebuild_url(entry["key"])
         if not url:
             continue
         picked.append(entry)
@@ -239,7 +254,7 @@ async def run_maintenance(
 
 
 __all__ = [
-    "LOCK_PATH", "STATE_PATH", "MaintainReport", "acquire_lock", "last_run_age_hours",
-    "load_state", "rebuild_url", "release_lock", "run_maintenance", "save_state",
-    "stale_resources",
+    "LOCK_PATH", "STATE_PATH", "MaintainReport", "acquire_lock", "cache_key_to_resource_key",
+    "last_run_age_hours", "load_state", "rebuild_url", "release_lock", "run_maintenance",
+    "save_state", "stale_resources",
 ]

@@ -11,15 +11,22 @@ from __future__ import annotations
 import json
 import time
 
+import httpx
 import pytest
 
 from pansearch import maintain
-from pansearch.models import Status, VerifyResult
-from pansearch.store import VerifyCache
+from pansearch.dedupe import build_resources
+from pansearch.models import RawHit, Status, VerifyResult
+from pansearch.store import CACHE_VERSION, VerifyCache
+from pansearch.verify import BaiduVerifier
 
 
 def make_cache(tmp_path, entries):
-    """造一个带条目的验活缓存：entries = [(resource_key, pwd, status, age_hours)]"""
+    """造一个带条目的验活缓存：entries = [(cache_key, pwd, status, age_hours)]
+
+    cache_key 必须和真实代码写进去的一致：百度验活按**裸 surl** 写（1AbCdEf），
+    其它网盘按资源键写（quark:pan.quark.cn/s/xxx）。
+    """
     cache = VerifyCache(tmp_path / "c.sqlite3", ttl_hours=6)
     for key, pwd, status, age in entries:
         cache.put(key, VerifyResult(status=Status(status)), pwd=pwd)
@@ -44,31 +51,89 @@ def test_rebuild_url(key, expect):
     assert maintain.rebuild_url(key) == expect
 
 
+@pytest.mark.parametrize("key,expect", [
+    ("1AbCdEf", "baidu:1AbCdEf"),          # 百度验活写缓存用的是裸 surl
+    ("1Ab-Cd_Ef", "baidu:1Ab-Cd_Ef"),
+    ("baidu:1AbCdEf", "baidu:1AbCdEf"),    # 已经是资源键的原样返回
+    ("quark:pan.quark.cn/s/abc123", "quark:pan.quark.cn/s/abc123"),
+    ("", ""),
+    (None, ""),
+])
+def test_cache_key_to_resource_key(key, expect):
+    assert maintain.cache_key_to_resource_key(key) == expect
+
+
 # ---------------------------------------------------------------- 队列选择
 def test_stale_resources_orders_by_age_and_skips_fresh_dead(tmp_path):
     cache = make_cache(tmp_path, [
-        ("baidu:AAAAAAAA", "aaaa", "alive", 240),      # 最久
-        ("baidu:BBBBBBBB", "bbbb", "alive", 120),
-        ("baidu:CCCCCCCC", "cccc", "dead", 10),        # 刚确认死掉：不该再花预算
-        ("baidu:DDDDDDDD", None, "not_found", 5),
+        ("1AAAAAAA", "aaaa", "alive", 240),            # 最久
+        ("1BBBBBBB", "bbbb", "alive", 120),
+        ("1CCCCCCC", "cccc", "dead", 10),              # 刚确认死掉：不该再花预算
+        ("1DDDDDDD", None, "not_found", 5),
         ("quark:pan.quark.cn/s/xyz", None, "alive", 200),
     ])
     resources, picked = maintain.stale_resources(cache, older_than_hours=6, limit=10)
     keys = [p["key"] for p in picked]
-    assert "baidu:CCCCCCCC" not in keys, "刚判死的链接不该反复验"
-    assert "baidu:DDDDDDDD" not in keys
-    assert keys[0] == "baidu:AAAAAAAA", "最久没验的排最前"
+    assert "baidu:1CCCCCCC" not in keys, "刚判死的链接不该反复验"
+    assert "baidu:1DDDDDDD" not in keys
+    assert keys[0] == "baidu:1AAAAAAA", "最久没验的排最前"
     assert {r.url for r in resources} == {
-        "https://pan.baidu.com/s/AAAAAAAA",
-        "https://pan.baidu.com/s/BBBBBBBB",
+        "https://pan.baidu.com/s/1AAAAAAA",
+        "https://pan.baidu.com/s/1BBBBBBB",
         "https://pan.quark.cn/s/xyz",
     }
     cache.close()
 
 
+async def test_baidu_rows_written_by_verifier_are_rechecked(tmp_path):
+    """回归：百度验活按裸 surl 写缓存（v2|1AbC…|pwd），键里没有 "baidu:"。
+
+    之前 rebuild_url 拆不出网盘类型直接返回 None，定时复验从来没验过一条百度链接。
+    这里走真实的写缓存路径，而不是手造一个代码根本不会写的 "baidu:xxx" 键。
+    """
+    surl = "1AbCdEfGhIjKlMnOpQrStUv"
+    cache = VerifyCache(tmp_path / "c.sqlite3", ttl_hours=6)
+    verifier = BaiduVerifier(
+        cfg={"rate_limit_qps": 0, "concurrency": 2, "timeout": 5, "retries": 0},
+        cache=cache,
+    )
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(200, json={"errno": 0})
+
+    verifier._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    verifier._warmed = True
+    try:
+        res = build_resources([RawHit(source="t", kind="t",
+                                      url=f"https://pan.baidu.com/s/{surl}", pwd="abcd")])[0]
+        await verifier.verify(res)
+        rows = [r[0] for r in cache.conn.execute("SELECT surl FROM verify_cache")]
+        assert rows == [cache.make_key(surl, "abcd")], "百度缓存键应是裸 surl"
+
+        cache.conn.execute("UPDATE verify_cache SET checked_at = ?", (time.time() - 48 * 3600,))
+        cache.conn.commit()
+
+        resources, picked = maintain.stale_resources(cache, older_than_hours=6, limit=10)
+        assert [p["key"] for p in picked] == [f"baidu:{surl}"]
+        assert [(r.url, r.surl, r.pwd) for r in resources] == [
+            (f"https://pan.baidu.com/s/{surl}", surl, "abcd")
+        ]
+
+        # 复验必须写回同一行，否则它会一直卡在队列最前面
+        calls.clear()
+        await verifier.verify(resources[0], use_cache=False)
+        assert calls, "复验应真的发出请求"
+        assert cache.pending_count(6) == 0
+    finally:
+        await verifier._client.aclose()
+        cache.close()
+
+
 def test_stale_resources_retries_long_dead(tmp_path):
     """死链超过 dead_retry_days 再验一次：分享者可能重新上传。"""
-    cache = make_cache(tmp_path, [("baidu:ZZZZZZZZ", None, "dead", 24 * 40)])
+    cache = make_cache(tmp_path, [("1ZZZZZZZ", None, "dead", 24 * 40)])
     resources, picked = maintain.stale_resources(cache, older_than_hours=6, limit=5)
     assert len(picked) == 1 and len(resources) == 1
     cache.close()
@@ -76,10 +141,55 @@ def test_stale_resources_retries_long_dead(tmp_path):
 
 def test_stale_resources_respects_limit(tmp_path):
     cache = make_cache(tmp_path, [
-        (f"baidu:{i:08d}", None, "alive", 100 + i) for i in range(10)
+        (f"1{i:07d}", None, "alive", 100 + i) for i in range(10)
     ])
     _, picked = maintain.stale_resources(cache, older_than_hours=6, limit=3)
     assert len(picked) == 3
+    cache.close()
+
+
+def test_young_dead_rows_do_not_clog_recheck_window(tmp_path):
+    """回归：没到重验时间的死链不能占住"最老的 N 行"窗口。
+
+    以前 stale() 先取最老的 3×limit 行，再在 Python 里丢掉年轻死链；这些行永远不会
+    被重验、checked_at 永远不变，一直排在 ORDER BY checked_at ASC 的最前面 ——
+    攒够 3×limit 条之后，每轮复验 0 条。
+    """
+    limit = 3
+    cache = make_cache(tmp_path, [
+        # 比所有活链都老、但还没到 dead_retry_days 的死链，数量远超 3×limit
+        *[(f"1DEAD{i:03d}", None, "dead" if i % 2 else "not_found", 24 * 10 + i)
+          for i in range(limit * 5)],
+        ("1LONGDEAD", None, "dead", 24 * 40),          # 超过 dead_retry_days：该重验
+        ("1ALIVE01", "abcd", "alive", 8),
+        ("quark:pan.quark.cn/s/alive02", None, "alive", 7),
+        ("1FRESH01", None, "alive", 1),                # 还没过期
+    ])
+    resources, picked = maintain.stale_resources(cache, older_than_hours=6, limit=limit,
+                                                 dead_retry_days=30)
+    assert [p["key"] for p in picked] == [
+        "baidu:1LONGDEAD", "baidu:1ALIVE01", "quark:pan.quark.cn/s/alive02",
+    ]
+    assert len(resources) == 3
+    cache.close()
+
+
+def test_old_cache_version_rows_do_not_clog_recheck_window(tmp_path):
+    """旧 CACHE_VERSION 前缀 / 无前缀的行不会再被 put 刷新，不能进复验队列。"""
+    limit = 3
+    cache = make_cache(tmp_path, [
+        ("1ALIVE01", None, "alive", 8),
+        ("1ALIVE02", None, "alive", 7),
+    ])
+    old = time.time() - 24 * 20 * 3600
+    cache.conn.executemany(
+        "INSERT INTO verify_cache (surl, status, checked_at) VALUES (?, 'alive', ?)",
+        [(f"v{CACHE_VERSION - 1}|1OLDVER{i:02d}|", old - i) for i in range(limit * 5)]
+        + [("no-version-prefix", old)],
+    )
+    cache.conn.commit()
+    _, picked = maintain.stale_resources(cache, older_than_hours=6, limit=limit)
+    assert [p["key"] for p in picked] == ["baidu:1ALIVE01", "baidu:1ALIVE02"]
     cache.close()
 
 

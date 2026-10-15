@@ -154,35 +154,49 @@ class VerifyCache:
         return {"cached_links": row[0] if row else 0, "db": str(self.path)}
 
     # ------------------------------------------------------------------ 定时复验
-    def stale(self, older_than_hours: float, limit: int = 200) -> list[dict]:
+    def stale(self, older_than_hours: float, limit: int = 200, *,
+              dead_older_than_hours: float | None = None) -> list[dict]:
         """列出已经/即将过期的缓存条目，供定时复验使用。
 
         为什么要它：验活缓存有 TTL（默认 6 小时），过期后**下一次搜索才会去重验**——
         也就是说一个关键词可能半年没人搜过，它下面的链接就半年没被复核过。
         定时任务按"最久没验的先验"把队列推平，而不是靠用户偶然搜到。
 
-        返回 [{key, pwd, status, checked_at, age_hours}]；key 是资源键
-        （baidu:1AbC / quark:pan.quark.cn/s/xxx），复验时用它重建 Resource。
+        dead_older_than_hours：死链（dead / not_found）单独的阈值（不会短于
+        older_than_hours），None 表示与其它状态相同。这个过滤必须放在 SQL 里：
+        如果先取最老的 N 行、再在调用方丢掉"还没到重验时间"的死链，这些行永远
+        不会被重验、checked_at 永远不变，会一直霸占 ORDER BY checked_at ASC 的
+        队头，攒够 N 条之后每轮一条都验不到。
+        同理只取当前 CACHE_VERSION 前缀的键：put 只写新前缀，旧版本 / 无前缀的行
+        永远不会被刷新，放进结果里同样会永久卡在队头。
+
+        返回 [{key, pwd, status, checked_at, age_hours}]；key 是写缓存时用的键：
+        百度是裸 surl（1AbCdEf），其它网盘是资源键（quark:pan.quark.cn/s/xxx）。
+        复验时先用 maintain.cache_key_to_resource_key 还原成资源键再重建 Resource。
         """
-        cutoff = time.time() - older_than_hours * 3600
+        now = time.time()
+        cutoff = now - older_than_hours * 3600
+        dead_cutoff = (cutoff if dead_older_than_hours is None
+                       else min(cutoff, now - dead_older_than_hours * 3600))
+        prefix = f"v{CACHE_VERSION}|"
+        dead_marks = ", ".join("?" * len(_DEAD_STATUSES))
         rows = self.conn.execute(
             "SELECT surl, status, checked_at FROM verify_cache"
-            " WHERE checked_at <= ? ORDER BY checked_at ASC LIMIT ?",
-            (cutoff, int(limit)),
+            " WHERE substr(surl, 1, ?) = ?"
+            f" AND checked_at <= CASE WHEN status IN ({dead_marks}) THEN ? ELSE ? END"
+            " ORDER BY checked_at ASC LIMIT ?",
+            (len(prefix), prefix, *_DEAD_STATUSES, dead_cutoff, cutoff, int(limit)),
         ).fetchall()
         out: list[dict] = []
         for surl, status, checked_at in rows:
-            # 缓存键格式：v{CACHE_VERSION}|<resource_key>|<pwd>
-            # （旧库可能残留不带版本前缀的键，拆不出两段就跳过这一条）
+            # 缓存键格式：v{CACHE_VERSION}|<cache_key>|<pwd>（前缀已由 SQL 保证）
             parts = str(surl).split("|")
-            if len(parts) < 2:
-                continue
             out.append({
                 "key": parts[1],
                 "pwd": parts[2] if len(parts) > 2 and parts[2] else None,
                 "status": status,
                 "checked_at": checked_at,
-                "age_hours": round((time.time() - checked_at) / 3600, 1),
+                "age_hours": round((now - checked_at) / 3600, 1),
             })
         return out
 

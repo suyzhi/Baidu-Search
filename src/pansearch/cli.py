@@ -59,6 +59,20 @@ def _parse_types(value: str | None) -> list[PanType] | None:
     return out or None
 
 
+# CSV 是给 Excel / WPS 打开的（utf-8-sig 的 BOM 就是为它们加的）。标题、大小、来源页
+# 都是从第三方页面抓来的文本，以 = + - @ 开头的单元格会被表格软件当成公式执行
+# （=HYPERLINK(...) / =cmd|... 之类的 CSV 注入）。按 OWASP 的做法在前面补一个 '，
+# 让它按纯文本显示。只处理字符串：命中次数是 int 不受影响；
+# 链接以 http / magnet 开头、分享时间以数字开头，也都不受影响。
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value):
+    if isinstance(value, str) and value.startswith(_CSV_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 def _truncate(text: str | None, width: int) -> str:
     if not text:
         return ""
@@ -238,7 +252,7 @@ def search(
         console.print(f"[green]已导出 JSON → {json_out}[/green]")
 
     if csv_out:
-        rows = [res.to_row() for res in resources]
+        rows = [{k: _csv_safe(v) for k, v in res.to_row().items()} for res in resources]
         with csv_out.open("w", newline="", encoding="utf-8-sig") as fh:
             writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
             writer.writeheader()
