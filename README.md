@@ -125,6 +125,13 @@ pansearch verify "https://115.com/s/xxx" -p 提取码
 pansearch sources                               # 列出启用的数据源
 pansearch stats                                 # 本地缓存统计
 
+# 批量验活：多个链接 / -f 文件 / -f - 读标准输入 → 表格 + 汇总
+# （同一分享自动去重；提取码写在链接 ?pwd= 或文本里，-p 只用于单条；迅雷/磁力等标"不支持"，不算存活）
+pansearch verify "https://pan.quark.cn/s/aaa" "https://pan.baidu.com/s/1bbb?pwd=1234"
+pansearch verify -f 链接.txt                    # 任意文本：帖子、聊天记录、一行一个链接都行
+pansearch verify -f out.csv --csv 复验.csv      # 复验 search / verify 导出的 CSV 或 JSON
+cat 链接.txt | pansearch verify -f - --alive-only > 存活.txt   # stdout 只留存活链接，汇总走 stderr
+
 # 定时维护：加深索引 + 复验过期链接（见下节）
 pansearch maintain --json .cache/maintain-report.json
 pansearch maintain --force --no-index --verify-limit 400   # 只做复验

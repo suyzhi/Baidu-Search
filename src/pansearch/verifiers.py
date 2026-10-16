@@ -485,10 +485,12 @@ class VerifierPool:
             await asyncio.gather(*self._early.values(), return_exceptions=True)
 
     # ---- 批量 ----
-    async def verify_all(self, resources: list[Resource], *, budget: int = 0) -> None:
+    async def verify_all(self, resources: list[Resource], *, budget: int = 0,
+                         use_cache: bool = True) -> None:
         """预算只计未缓存的联网校验；先恢复全部缓存，再处理按相关性排好的候选。
 
         prefetch 已发起的验活计入预算；还没完成的和新发起的共用同一个 deadline。
+        use_cache=False 时不读缓存、全部联网重验（结果照常写回缓存），供 verify --no-cache 使用。
         """
         pending: list[Resource] = []
         awaiting: list[tuple[Resource, asyncio.Task]] = []
@@ -500,7 +502,7 @@ class VerifierPool:
             if early is not None:
                 awaiting.append((res, early))
                 continue
-            cached = self.cached_result(res)
+            cached = self.cached_result(res) if use_cache else None
             if cached is not None:
                 self._apply_cached(res, cached)
             else:

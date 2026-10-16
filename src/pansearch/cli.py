@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import sys
 from pathlib import Path
 from dataclasses import asdict
 from typing import Optional
@@ -12,8 +13,10 @@ from typing import Optional
 import typer
 from rich import box
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from . import __version__
 from .extract import excerpt
@@ -23,6 +26,8 @@ from .store import VerifyCache
 
 app = typer.Typer(add_completion=False, help="全网网盘资源搜索器（百度优先 + 全类型兜底）")
 console = Console()
+# 提示 / 进度 / 汇总走 stderr 的场景（verify --alive-only：stdout 只留给链接，方便管道）
+err_console = Console(stderr=True)
 
 STATUS_STYLE = {
     Status.ALIVE: "bold green",
@@ -262,11 +267,43 @@ def search(
 
 @app.command()
 def verify(
-    url: str = typer.Argument(..., help="网盘分享链接"),
-    pwd: Optional[str] = typer.Option(None, "--pwd", "-p", help="提取码"),
+    urls: Optional[list[str]] = typer.Argument(
+        None, help="网盘分享链接，可给多个（只给一条且不带 -f 时即单条校验）", show_default=False),
+    pwd: Optional[str] = typer.Option(None, "--pwd", "-p", help="提取码（仅限单条链接）"),
+    file: Optional[str] = typer.Option(
+        None, "--file", "-f",
+        help="批量：从文件读取（- 表示标准输入）；任意文本，或 search/verify 导出的 CSV / JSON"),
     no_cache: bool = typer.Option(False, "--no-cache", help="忽略缓存重新校验"),
+    alive_only: bool = typer.Option(
+        False, "--alive-only",
+        help="批量：stdout 只输出存活链接（一行一条，便于管道），汇总走 stderr；导出文件仍含全部结果"),
+    json_out: Optional[Path] = typer.Option(None, "--json", help="批量结果导出为 JSON"),
+    csv_out: Optional[Path] = typer.Option(None, "--csv", help="批量结果导出为 CSV"),
 ) -> None:
-    """校验单条网盘链接是否有效（支持百度/夸克/阿里/115/天翼）。"""
+    """校验网盘链接是否有效（支持百度/夸克/阿里/115/天翼），可一次校验多条。
+
+    只给一条链接、且不带 -f / --alive-only / --json / --csv 时就是原来的单条校验：
+    输出一行结论，退出码 0=已校验 / 1=无法识别 / 2=该网盘不支持验活。
+    其余情况按批量处理：表格 + 汇总；迅雷/UC/123/PikPak/磁力等只标"不支持"，不算存活。
+    """
+    urls = list(urls or [])
+    if len(urls) == 1 and file is None and not (alive_only or json_out or csv_out):
+        _verify_single(urls[0], pwd, no_cache)
+        return
+    if pwd is not None and (len(urls) != 1 or file is not None):
+        raise typer.BadParameter(
+            "只能配合单条链接使用；批量时请把提取码写进链接（?pwd=xxxx）或输入文本里",
+            param_hint="'--pwd' / '-p'",
+        )
+    if not urls and file is None:
+        raise typer.BadParameter("请给出至少一条链接，或用 -f 指定文件（- 表示标准输入）",
+                                 param_hint="'urls'")
+    _verify_batch(urls, pwd=pwd, file=file, no_cache=no_cache, alive_only=alive_only,
+                  json_out=json_out, csv_out=csv_out)
+
+
+def _verify_single(url: str, pwd: Optional[str], no_cache: bool) -> None:
+    """单条校验：输出格式与退出码（0 / 1 无法识别 / 2 不支持）保持不变，脚本可能依赖它。"""
     from .dedupe import build_resources
     from .models import RawHit
     from .verifiers import VerifierPool
@@ -304,6 +341,131 @@ def verify(
         f"[{style}]{label}[/{style}]  {target.pan_type.label}  {detail}"
         + (f"  [dim]{result.note}[/dim]" if result.note else "")
     )
+
+
+def _decode_input(data: bytes) -> str:
+    """先按 UTF-8（含 BOM）解码，失败再按 GB18030（Windows 记事本 / cmd 管道的 GBK 文本）。"""
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("gb18030", errors="replace")
+
+
+def _read_input(spec: str) -> tuple[str, str]:
+    """读 -f 指定的输入，返回 (文本, 来源名)；- 为标准输入，与文件按同一套规则解码。"""
+    if spec == "-":
+        stream = getattr(sys.stdin, "buffer", None)
+        return (_decode_input(stream.read()) if stream is not None else sys.stdin.read()), "stdin"
+    path = Path(spec)
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        err_console.print(f"[red]无法读取 {escape(str(path))}：{escape(exc.strerror or str(exc))}[/red]")
+        raise typer.Exit(1)
+    return _decode_input(data), path.name
+
+
+def _verify_batch(urls: list[str], *, pwd: Optional[str], file: Optional[str],
+                  no_cache: bool, alive_only: bool, json_out: Optional[Path],
+                  csv_out: Optional[Path]) -> None:
+    """批量校验：表格 + 汇总；--alive-only 时 stdout 只留存活链接，其余信息走 stderr。"""
+    from .batchverify import (
+        BatchReport, Collected, build_batch, collect_hits, remark, to_export_item,
+        to_export_row, verify_batch, was_cached,
+    )
+    from .verifiers import VerifierPool
+
+    out = err_console if alive_only else console
+    collected = Collected()
+    for url in urls:
+        got = collect_hits(url, source_name="cli")
+        if pwd:                                    # 只可能是"单条链接 + 导出/管道参数"
+            for hit in got.hits:
+                hit.pwd = pwd
+        if not got.hits and not got.unrecognised:
+            got.unrecognised.append(url)
+        collected.extend(got)
+    if file is not None:
+        text, name = _read_input(file)
+        collected.extend(collect_hits(text, source_name=name))
+
+    resources = build_batch(collected)
+    unrecognised = collected.unrecognised
+    if not resources:
+        out.print("[red]没有识别到可校验的网盘链接[/red]"
+                  "（支持百度网盘 / 夸克 / 阿里云盘 / 115 / 天翼189；其余网盘会标为不支持）")
+        if unrecognised:
+            out.print(f"[dim]无法识别 {len(unrecognised)} 条："
+                      f"{escape(_truncate('、'.join(unrecognised[:5]), 120))}[/dim]")
+        raise typer.Exit(1)
+
+    with out.status(f"[cyan]正在校验 {len(resources)} 条链接…[/cyan]") as spinner:
+        def progress(done: int, total: int) -> None:
+            spinner.update(f"[cyan]正在校验链接 {done}/{total}…[/cyan]")
+
+        async def _run() -> BatchReport:
+            async with VerifierPool() as pool:
+                return await verify_batch(resources, pool, use_cache=not no_cache,
+                                          on_progress=progress)
+
+        report = asyncio.run(_run())
+    counts = report.counts
+
+    if alive_only:
+        for res in report.alive:
+            typer.echo(res.copy_text())
+    else:
+        table = Table(box=box.SIMPLE, header_style="bold cyan")
+        table.add_column("#", justify="right", no_wrap=True)
+        table.add_column("状态", no_wrap=True)
+        table.add_column("网盘", no_wrap=True)
+        table.add_column("链接", overflow="fold")
+        table.add_column("提取码", no_wrap=True)
+        # 备注限宽：终端不够宽时 Rich 先压最宽的可折行列，不限的话被折断的是链接
+        table.add_column("备注", overflow="fold", max_width=26)
+        for i, res in enumerate(resources, 1):
+            note = Text(_truncate(remark(res), 48))
+            if was_cached(res):
+                note.append(" (缓存)" if note.plain else "(缓存)", style="dim")
+            table.add_row(str(i), Text(res.status_label, style=STATUS_STYLE.get(res.status, "")),
+                          res.pan_type.label, Text(res.open_url()), Text(res.pwd or ""), note)
+        console.print(table)
+
+    duplicates = len(collected.hits) - len(resources)
+    out.print(
+        f"共 [bold]{counts['total']}[/bold] 条"
+        + (f"（去重合并 {duplicates} 条）" if duplicates else "")
+        + f" ｜ 存活 [green]{counts['alive']}[/green]"
+        f" ｜ 码不对 [yellow]{counts['wrong_pwd']}[/yellow]"
+        f" ｜ 失效 [red]{counts['dead']}[/red]"
+        f" ｜ 不支持 {counts['unsupported']} ｜ 未知 {counts['unknown']}"
+        f" ｜ 缓存命中 {counts['cache_hit']}"
+        + (f" ｜ [yellow]无法识别 {len(unrecognised)}[/yellow]" if unrecognised else "")
+    )
+    if counts["unsupported"]:
+        out.print(f"[dim]不支持验活的 {counts['unsupported']} 条（迅雷/UC/123/PikPak/磁力等）"
+                  f"未经验证，不代表有效[/dim]")
+    if unrecognised:
+        out.print(f"[dim]无法识别：{escape(_truncate('、'.join(unrecognised[:5]), 120))}"
+                  + (f" 等 {len(unrecognised)} 条" if len(unrecognised) > 5 else "") + "[/dim]")
+
+    if json_out:
+        payload = {
+            "summary": {**counts, "inputs": len(collected.hits), "duplicates": duplicates,
+                        "unrecognised": len(unrecognised)},
+            "unrecognised": unrecognised,
+            "results": [to_export_item(res) for res in resources],
+        }
+        json_out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        out.print(f"[green]已导出 JSON → {escape(str(json_out))}[/green]")
+
+    if csv_out:
+        rows = [{k: _csv_safe(v) for k, v in to_export_row(res).items()} for res in resources]
+        with csv_out.open("w", newline="", encoding="utf-8-sig") as fh:
+            writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+        out.print(f"[green]已导出 CSV → {escape(str(csv_out))}[/green]")
 
 
 @app.command()
@@ -946,6 +1108,7 @@ def _root(
                 "  pansearch web                  启动本地网页版搜索器\n"
                 "  pansearch search \"关键词\"      命令行搜索（默认只显示存活链接）\n"
                 "  pansearch verify <链接> -p 提取码   校验单条链接\n"
+                "  pansearch verify -f 链接.txt        批量校验（文本 / 导出的 CSV、JSON）\n"
                 "  pansearch sources              列出启用的数据源\n"
                 "  pansearch stats                本地缓存统计\n\n"
                 "[dim]加 --help 查看完整参数[/dim]",

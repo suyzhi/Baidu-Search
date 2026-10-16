@@ -314,6 +314,36 @@ async def test_stats_cache_hit_not_counted_as_request(tmp_path):
     assert pool.stats["alive"] == 2            # 但存活计数两次都算
 
 
+async def test_verify_all_use_cache_false_ignores_cache_but_refreshes_it(tmp_path):
+    """verify --no-cache 走 verify_all(use_cache=False)：不读缓存、全部联网，新结论照常写回缓存。"""
+    from pansearch.models import VerifyResult
+
+    url = "https://pan.quark.cn/s/cc1cb432f2cf"
+    pool = make_pool(tmp_path, None)
+    pool.cache.put(make_resource(url).key, VerifyResult(status=Status.DEAD, method="quark"))
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": 200, "code": 0})
+
+    try:
+        async with pool:
+            await pool._client.aclose()
+            pool._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            cached = make_resource(url)
+            await pool.verify_all([cached])                    # 默认：命中缓存，不联网
+            assert cached.status is Status.DEAD and requests == []
+
+            fresh = make_resource(url)
+            await pool.verify_all([fresh], use_cache=False)
+            assert fresh.status is Status.ALIVE and len(requests) == 1
+            assert pool.stats["cache_hit"] == 1 and pool.stats["checked"] == 1
+        assert pool.cache.get(fresh.key, None).status is Status.ALIVE
+    finally:
+        pool.cache.close()
+
+
 # ---------------------------------------------------------------- 状态文案
 def test_status_label_reflects_pwd_verification():
     from pansearch.models import VerifyResult
