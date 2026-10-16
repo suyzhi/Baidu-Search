@@ -203,12 +203,16 @@ def extract_from_text(
         if not lk["pwd"]:
             lk["pwd"] = pwd_hint or None
 
-    seen: set[str] = set()
+    seen: dict[str, RawHit] = {}
     hits: list[RawHit] = []
     for lk in links:
-        if lk["url"] in seen:
+        first = seen.get(lk["url"])
+        if first is not None:
+            # 同一链接出现多次只留第一次；但第一次没带码、后面那次带了（先贴裸链接、
+            # 后面再补 ?pwd=xxxx）时，码不能跟着重复项一起丢 —— 与 build_resources 合并口径一致
+            if lk["pwd"] and not first.pwd:
+                first.pwd = lk["pwd"]
             continue
-        seen.add(lk["url"])
         hits.append(
             RawHit(
                 source=source,
@@ -221,4 +225,5 @@ def extract_from_text(
                 origin=origin or lk["url"],
             )
         )
+        seen[lk["url"]] = hits[-1]
     return hits
