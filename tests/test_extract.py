@@ -51,6 +51,17 @@ def test_multiple_links_each_get_own_pwd():
     assert [h.pwd for h in hits] == ["1111", "2222"]
 
 
+def test_duplicate_link_keeps_code_from_later_occurrence():
+    """同一链接先裸贴、后面补 ?pwd= 时，去重不能把后补的提取码一起丢掉；已有码则保留第一个。"""
+    text = ("https://pan.baidu.com/s/1EEEEEEEEEEE 稍后补码\n"
+            "补：https://pan.baidu.com/s/1EEEEEEEEEEE?pwd=e5e5\n"
+            "https://pan.quark.cn/s/251cd20497e6 提取码 aaaa\n"
+            "https://pan.quark.cn/s/251cd20497e6 提取码 bbbb")
+    hits = _hits(text)
+    assert [(h.url.rsplit("/", 1)[-1], h.pwd) for h in hits] == [
+        ("1EEEEEEEEEEE", "e5e5"), ("251cd20497e6", "aaaa")]
+
+
 def test_skips_unparseable_baidu_link():
     # share/link?shareid= 无法解析出 surl，无法验活也无法去重 -> 丢弃
     assert _hits("https://pan.baidu.com/share/link?shareid=123&uk=456") == []
